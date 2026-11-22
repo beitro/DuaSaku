@@ -1,0 +1,61 @@
+name: Build DuaSaku Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: 'Backend API URL untuk APK (contoh: http://192.168.1.14:4100 atau URL Vercel)'
+        required: false
+        default: 'http://192.168.1.14:4100'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Generate Android native project (Expo Prebuild)
+        env:
+          EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'http://192.168.1.14:4100' }}
+        run: npx expo prebuild --platform android --non-interactive
+
+      - name: Build Standalone Release APK
+        env:
+          EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'http://192.168.1.14:4100' }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Verify APK output
+        run: ls -lh android/app/build/outputs/apk/release/
+
+      - name: Upload DuaSaku APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DuaSaku-Android-APK
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 30

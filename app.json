@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "DuaSaku — Keuangan Pasangan",
+    "slug": "duasaku",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": [
+      "./plugins/withCleartextTraffic.js"
+    ],
+    "android": {
+      "package": "com.duasaku.couplefinance",
+      "adaptiveIcon": {
+        "backgroundColor": "#FAF6F0"
+      }
+    },
+    "extra": {
+      "apiUrl": "http://192.168.1.14:4100"
+    }
+  }
+}
