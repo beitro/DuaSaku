@@ -60,13 +60,41 @@ function roundMoney(n) {
   return Math.round(Number(n) * 100) / 100;
 }
 
+function parseStrictNumber(val, message, { min, exclusiveMin } = {}) {
+  if (
+    val === undefined ||
+    val === null ||
+    typeof val === 'boolean' ||
+    Array.isArray(val) ||
+    typeof val === 'object' ||
+    (typeof val === 'string' && val.trim() === '')
+  ) {
+    throw new HttpError(400, message);
+  }
+  const n = Number(val);
+  if (!Number.isFinite(n)) {
+    throw new HttpError(400, message);
+  }
+  const rounded = roundMoney(n);
+  if (min !== undefined && rounded < min) {
+    throw new HttpError(400, message);
+  }
+  if (exclusiveMin !== undefined && rounded <= exclusiveMin) {
+    throw new HttpError(400, message);
+  }
+  return rounded;
+}
+
 function signedDelta(type, amount) {
   return type === 'income' ? amount : -amount;
 }
 
 function parseTzOffset(rawTz) {
-  if (rawTz === undefined || rawTz === null || String(rawTz).trim() === '') {
+  if (rawTz === undefined || rawTz === null || (typeof rawTz === 'string' && rawTz.trim() === '')) {
     return 0;
+  }
+  if (typeof rawTz === 'boolean' || Array.isArray(rawTz) || typeof rawTz === 'object') {
+    throw new HttpError(400, 'Parameter tzOffset harus berupa angka.');
   }
   const n = Number(rawTz);
   if (!Number.isFinite(n)) {
@@ -114,6 +142,9 @@ function parseOccurredAt(val, { allowUndefined = true } = {}) {
   }
   if (val === null || val === '') {
     if (allowUndefined) return new Date().toISOString();
+    throw new HttpError(400, 'Tanggal transaksi (occurredAt) tidak valid.');
+  }
+  if (typeof val === 'boolean' || Array.isArray(val)) {
     throw new HttpError(400, 'Tanggal transaksi (occurredAt) tidak valid.');
   }
   const d = new Date(val);
@@ -167,6 +198,7 @@ const mem = {
   categories: new Map(), // coupleId -> Category[]
   accounts: new Map(), // coupleId -> Account[]
   transactions: new Map(), // coupleId -> Transaction[]
+  transfers: new Map(), // coupleId -> AccountTransfer[]
   budgets: new Map(), // coupleId -> Budget[]
   notes: new Map(), // coupleId -> Note[]
 };
@@ -237,6 +269,44 @@ function hydrateMemAccount(acc) {
     icon: acc.icon,
     color: acc.color,
     createdAt: acc.createdAt,
+  };
+}
+
+function hydrateMemNote(note) {
+  const author = mem.partners.get(note.authorPartnerId);
+  return {
+    id: note.id,
+    coupleId: note.coupleId,
+    authorPartnerId: note.authorPartnerId,
+    authorName: author ? author.name : note.authorName,
+    categoryId: note.categoryId,
+    title: note.title,
+    content: note.content,
+    isPinned: note.isPinned,
+    updatedAt: note.updatedAt,
+  };
+}
+
+function hydrateMemTransfer(tr, coupleId) {
+  const partner = mem.partners.get(tr.partnerId);
+  const accounts = mem.accounts.get(coupleId) || [];
+  const fromAcc = tr.fromAccountId ? accounts.find((a) => a.id === tr.fromAccountId) : null;
+  const toAcc = tr.toAccountId ? accounts.find((a) => a.id === tr.toAccountId) : null;
+  return {
+    id: tr.id,
+    coupleId: tr.coupleId,
+    partnerId: tr.partnerId,
+    partnerName: partner ? partner.name : tr.partnerName,
+    fromAccountId: fromAcc ? fromAcc.id : null,
+    fromAccountName: fromAcc ? fromAcc.name : null,
+    fromAccountIcon: fromAcc ? fromAcc.icon : null,
+    toAccountId: toAcc ? toAcc.id : null,
+    toAccountName: toAcc ? toAcc.name : null,
+    toAccountIcon: toAcc ? toAcc.icon : null,
+    amount: roundMoney(tr.amount),
+    note: tr.note,
+    occurredAt: tr.occurredAt,
+    createdAt: tr.createdAt,
   };
 }
 
@@ -332,6 +402,7 @@ app.post(
       );
       mem.accounts.set(coupleId, []);
       mem.transactions.set(coupleId, []);
+      mem.transfers.set(coupleId, []);
       mem.budgets.set(coupleId, []);
       mem.notes.set(coupleId, []);
     }
@@ -423,6 +494,95 @@ app.get(
   })
 );
 
+// Update couple profile (coupleName and/or requesting partner's display name)
+app.patch(
+  '/api/couple',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId, id: partnerId } = req.partner;
+    const { coupleName, partnerName, name } = req.body || {};
+    const rawPartnerName = partnerName !== undefined ? partnerName : name;
+
+    if (coupleName === undefined && rawPartnerName === undefined) {
+      throw new HttpError(400, 'Minimal salah satu dari coupleName atau partnerName wajib diisi.');
+    }
+
+    let cleanCoupleName;
+    if (coupleName !== undefined) {
+      cleanCoupleName = String(coupleName ?? '').trim();
+      if (cleanCoupleName.length < 2) {
+        throw new HttpError(400, 'Nama ruang pasangan minimal 2 karakter.');
+      }
+    }
+
+    let cleanPartnerName;
+    if (rawPartnerName !== undefined) {
+      cleanPartnerName = String(rawPartnerName ?? '').trim();
+      if (cleanPartnerName.length < 2) {
+        throw new HttpError(400, 'Nama pasangan minimal 2 karakter.');
+      }
+    }
+
+    if (pool) {
+      const result = await withPgTx(async (client) => {
+        if (cleanCoupleName !== undefined) {
+          await client.query('UPDATE couples SET couple_name = $1 WHERE id = $2', [cleanCoupleName, coupleId]);
+        }
+        if (cleanPartnerName !== undefined) {
+          await client.query('UPDATE partners SET name = $1 WHERE id = $2 AND couple_id = $3', [
+            cleanPartnerName,
+            partnerId,
+            coupleId,
+          ]);
+        }
+        const [cRes, pRes] = await Promise.all([
+          client.query('SELECT id, couple_name AS "coupleName", invite_code AS "inviteCode" FROM couples WHERE id = $1', [
+            coupleId,
+          ]),
+          client.query(
+            'SELECT id, couple_id AS "coupleId", name, role_label AS "roleLabel", avatar_color AS "avatarColor" FROM partners WHERE couple_id = $1 ORDER BY created_at ASC',
+            [coupleId]
+          ),
+        ]);
+        const updatedPartner = pRes.rows.find((p) => p.id === partnerId);
+        return {
+          couple: { ...cRes.rows[0], partners: pRes.rows },
+          partner: updatedPartner,
+        };
+      });
+      return res.json(result);
+    }
+
+    const couple = mem.couples.get(coupleId);
+    if (!couple) throw new HttpError(404, 'Ruang pasangan tidak ditemukan.');
+    if (cleanCoupleName !== undefined) {
+      couple.coupleName = cleanCoupleName;
+    }
+    const partnerObj = mem.partners.get(partnerId);
+    if (!partnerObj || partnerObj.coupleId !== coupleId) {
+      throw new HttpError(404, 'Profil pasangan tidak ditemukan.');
+    }
+    if (cleanPartnerName !== undefined) {
+      partnerObj.name = cleanPartnerName;
+    }
+    const partners = Array.from(mem.partners.values())
+      .filter((p) => p.coupleId === coupleId)
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+      .map(({ id, coupleId: cId, name: pName, roleLabel, avatarColor }) => ({
+        id,
+        coupleId: cId,
+        name: pName,
+        roleLabel,
+        avatarColor,
+      }));
+    const updatedPartner = partners.find((p) => p.id === partnerId);
+    res.json({
+      couple: { ...couple, partners },
+      partner: updatedPartner,
+    });
+  })
+);
+
 // Categories (Menikah, Traveling, Investasi + Custom)
 app.get(
   '/api/categories',
@@ -454,21 +614,21 @@ app.post(
   authPartner,
   asyncHandler(async (req, res) => {
     const { coupleId } = req.partner;
-    const { name, icon = '✨', color = DEFAULT_CATEGORY_COLOR, targetAmount = 0 } = req.body || {};
+    const { name, icon = '✨', color = DEFAULT_CATEGORY_COLOR, targetAmount } = req.body || {};
     if (!name || String(name).trim().length < 2) {
       return res.status(400).json({ error: 'Nama kategori wajib diisi.' });
     }
-    const parsedTarget = Number(targetAmount);
-    if (!Number.isFinite(parsedTarget) || parsedTarget < 0) {
-      return res.status(400).json({ error: 'Target nominal kategori tidak valid.' });
-    }
+    const parsedTarget =
+      targetAmount === undefined
+        ? 0
+        : parseStrictNumber(targetAmount, 'Target nominal kategori tidak valid.', { min: 0 });
     const cat = {
       id: randomUUID(),
       coupleId,
       name: String(name).trim(),
       icon: String(icon || '✨').slice(0, 16),
       color: String(color || DEFAULT_CATEGORY_COLOR).slice(0, 20),
-      targetAmount: roundMoney(Math.max(0, parsedTarget)),
+      targetAmount: parsedTarget,
       isDefault: false,
     };
     if (pool) {
@@ -480,6 +640,138 @@ app.post(
       mem.categories.get(coupleId).push({ ...cat, createdAtMs: Date.now() });
     }
     res.status(201).json(cat);
+  })
+);
+
+app.patch(
+  '/api/categories/:id',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const categoryId = assertUuid(req.params.id, 'categoryId');
+    const { name, icon, color, targetAmount } = req.body || {};
+
+    if (name !== undefined && String(name ?? '').trim().length < 2) {
+      throw new HttpError(400, 'Nama kategori minimal 2 karakter.');
+    }
+    let parsedTarget;
+    if (targetAmount !== undefined) {
+      parsedTarget = parseStrictNumber(targetAmount, 'Target nominal kategori tidak valid.', { min: 0 });
+    }
+
+    if (pool) {
+      const cat = await withPgTx(async (client) => {
+        const curRes = await client.query(
+          `SELECT id, couple_id AS "coupleId", name, icon, color,
+                  target_amount::float8 AS "targetAmount", is_default AS "isDefault"
+           FROM categories WHERE id = $1 AND couple_id = $2 FOR UPDATE`,
+          [categoryId, coupleId]
+        );
+        if (!curRes.rowCount) {
+          throw new HttpError(404, 'Kategori tidak ditemukan.');
+        }
+        const cur = curRes.rows[0];
+        const nextName = name !== undefined ? String(name).trim() : cur.name;
+        const nextIcon = icon !== undefined ? String(icon || '✨').slice(0, 16) : cur.icon;
+        const nextColor = color !== undefined ? String(color || DEFAULT_CATEGORY_COLOR).slice(0, 20) : cur.color;
+        const nextTarget = parsedTarget !== undefined ? parsedTarget : roundMoney(cur.targetAmount);
+
+        const upd = await client.query(
+          `UPDATE categories
+           SET name = $1, icon = $2, color = $3, target_amount = $4
+           WHERE id = $5 AND couple_id = $6
+           RETURNING id, couple_id AS "coupleId", name, icon, color,
+                     target_amount::float8 AS "targetAmount", is_default AS "isDefault"`,
+          [nextName, nextIcon, nextColor, nextTarget, categoryId, coupleId]
+        );
+        return upd.rows[0];
+      });
+      return res.json(cat);
+    }
+
+    const list = mem.categories.get(coupleId) || [];
+    const cat = list.find((c) => c.id === categoryId);
+    if (!cat) {
+      throw new HttpError(404, 'Kategori tidak ditemukan.');
+    }
+    if (name !== undefined) cat.name = String(name).trim();
+    if (icon !== undefined) cat.icon = String(icon || '✨').slice(0, 16);
+    if (color !== undefined) cat.color = String(color || DEFAULT_CATEGORY_COLOR).slice(0, 20);
+    if (parsedTarget !== undefined) cat.targetAmount = parsedTarget;
+
+    res.json({
+      id: cat.id,
+      coupleId: cat.coupleId,
+      name: cat.name,
+      icon: cat.icon,
+      color: cat.color,
+      targetAmount: cat.targetAmount,
+      isDefault: cat.isDefault,
+    });
+  })
+);
+
+app.delete(
+  '/api/categories/:id',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const categoryId = assertUuid(req.params.id, 'categoryId');
+
+    if (pool) {
+      await withPgTx(async (client) => {
+        const curRes = await client.query(
+          'SELECT id FROM categories WHERE id = $1 AND couple_id = $2 FOR UPDATE',
+          [categoryId, coupleId]
+        );
+        if (!curRes.rowCount) {
+          throw new HttpError(404, 'Kategori tidak ditemukan.');
+        }
+
+        const [txRef, bdgRef, noteRef] = await Promise.all([
+          client.query('SELECT 1 FROM transactions WHERE couple_id = $1 AND category_id = $2 LIMIT 1', [
+            coupleId,
+            categoryId,
+          ]),
+          client.query('SELECT 1 FROM budgets WHERE couple_id = $1 AND category_id = $2 LIMIT 1', [
+            coupleId,
+            categoryId,
+          ]),
+          client.query('SELECT 1 FROM shared_notes WHERE couple_id = $1 AND category_id = $2 LIMIT 1', [
+            coupleId,
+            categoryId,
+          ]),
+        ]);
+        if (txRef.rowCount > 0 || bdgRef.rowCount > 0 || noteRef.rowCount > 0) {
+          throw new HttpError(
+            409,
+            'Kategori tidak dapat dihapus karena masih digunakan oleh transaksi, anggaran, atau catatan.'
+          );
+        }
+
+        await client.query('DELETE FROM categories WHERE id = $1 AND couple_id = $2', [categoryId, coupleId]);
+      });
+      return res.json({ ok: true, id: categoryId });
+    }
+
+    const list = mem.categories.get(coupleId) || [];
+    const idx = list.findIndex((c) => c.id === categoryId);
+    if (idx < 0) {
+      throw new HttpError(404, 'Kategori tidak ditemukan.');
+    }
+
+    const usedInTx = (mem.transactions.get(coupleId) || []).some((t) => t.categoryId === categoryId);
+    const usedInBudget = (mem.budgets.get(coupleId) || []).some((b) => b.categoryId === categoryId);
+    const usedInNotes = (mem.notes.get(coupleId) || []).some((n) => n.categoryId === categoryId);
+    if (usedInTx || usedInBudget || usedInNotes) {
+      throw new HttpError(
+        409,
+        'Kategori tidak dapat dihapus karena masih digunakan oleh transaksi, anggaran, atau catatan.'
+      );
+    }
+
+    list.splice(idx, 1);
+    res.json({ ok: true, id: categoryId });
   })
 );
 
@@ -524,7 +816,7 @@ app.post(
       accountType = 'cash',
       isShared = false,
       ownerPartnerId,
-      initialBalance = 0,
+      initialBalance,
       icon = DEFAULT_ACCOUNT_ICON,
       color = DEFAULT_ACCOUNT_COLOR,
     } = req.body || {};
@@ -535,11 +827,10 @@ app.post(
     if (!ACCOUNT_TYPES.includes(accountType)) {
       throw new HttpError(400, 'Tipe akun tidak valid.');
     }
-    const rawInitial = initialBalance === undefined || initialBalance === null || initialBalance === '' ? 0 : Number(initialBalance);
-    if (!Number.isFinite(rawInitial)) {
-      throw new HttpError(400, 'Saldo awal harus berupa angka valid.');
-    }
-    const cleanInitial = roundMoney(rawInitial);
+    const cleanInitial =
+      initialBalance === undefined
+        ? 0
+        : parseStrictNumber(initialBalance, 'Saldo awal harus berupa angka valid.');
     const shared = Boolean(isShared);
 
     let resolvedOwnerId = null;
@@ -626,11 +917,7 @@ app.patch(
     }
     let parsedInitial;
     if (initialBalance !== undefined) {
-      const n = Number(initialBalance);
-      if (initialBalance === null || initialBalance === '' || !Number.isFinite(n)) {
-        throw new HttpError(400, 'Saldo awal harus berupa angka valid.');
-      }
-      parsedInitial = roundMoney(n);
+      parsedInitial = parseStrictNumber(initialBalance, 'Saldo awal harus berupa angka valid.');
     }
 
     let validatedOwnerId;
@@ -763,7 +1050,198 @@ app.delete(
         tx.accountId = null;
       }
     }
+    const transfers = mem.transfers.get(coupleId) || [];
+    for (const tr of transfers) {
+      if (tr.fromAccountId === accountId) tr.fromAccountId = null;
+      if (tr.toAccountId === accountId) tr.toAccountId = null;
+    }
     res.json({ ok: true, id: accountId });
+  })
+);
+
+app.get(
+  '/api/accounts/transfers',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const tz = parseTzOffset(req.query.tzOffset);
+    const monthStr = validateMonth(req.query.month, { required: false });
+    const bounds = monthStr ? getMonthBounds(monthStr, tz) : null;
+
+    if (pool) {
+      const clauses = ['t.couple_id = $1'];
+      const params = [coupleId];
+      if (bounds) {
+        params.push(bounds.startIso, bounds.endIso);
+        clauses.push(`t.occurred_at >= $${params.length - 1} AND t.occurred_at < $${params.length}`);
+      }
+      const r = await pool.query(
+        `SELECT t.id, t.couple_id AS "coupleId", t.partner_id AS "partnerId", p.name AS "partnerName",
+                t.from_account_id AS "fromAccountId", fa.name AS "fromAccountName", fa.icon AS "fromAccountIcon",
+                t.to_account_id AS "toAccountId", ta.name AS "toAccountName", ta.icon AS "toAccountIcon",
+                t.amount::float8 AS amount, t.note, t.occurred_at AS "occurredAt", t.created_at AS "createdAt"
+         FROM account_transfers t
+         JOIN partners p ON p.id = t.partner_id
+         LEFT JOIN accounts fa ON fa.id = t.from_account_id
+         LEFT JOIN accounts ta ON ta.id = t.to_account_id
+         WHERE ${clauses.join(' AND ')}
+         ORDER BY t.occurred_at DESC, t.created_at DESC`,
+        params
+      );
+      return res.json({ transfers: r.rows });
+    }
+
+    let list = mem.transfers.get(coupleId) || [];
+    if (bounds) {
+      list = list.filter((tr) => {
+        const ms = new Date(tr.occurredAt).getTime();
+        return ms >= bounds.startMs && ms < bounds.endMs;
+      });
+    }
+    const transfers = [...list]
+      .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime() || b.createdAtMs - a.createdAtMs)
+      .map((tr) => hydrateMemTransfer(tr, coupleId));
+    res.json({ transfers });
+  })
+);
+
+app.post(
+  '/api/accounts/transfer',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId, id: partnerId, name: partnerName } = req.partner;
+    const { fromAccountId, toAccountId, amount, note = '', date, occurredAt } = req.body || {};
+
+    const cleanFromId = assertUuid(fromAccountId, 'fromAccountId');
+    const cleanToId = assertUuid(toAccountId, 'toAccountId');
+    if (cleanFromId === cleanToId) {
+      throw new HttpError(400, 'Dompet asal dan tujuan tidak boleh sama.');
+    }
+
+    const numericAmount = parseStrictNumber(amount, 'Nominal transfer harus lebih dari 0.', { exclusiveMin: 0 });
+
+    const hasOccurredAt = occurredAt !== undefined;
+    const hasDate = date !== undefined;
+    const rawDate = hasOccurredAt ? occurredAt : date;
+    const isoDate = parseOccurredAt(rawDate, { allowUndefined: !hasOccurredAt && !hasDate });
+    const cleanNote = String(note ?? '');
+    const transferId = randomUUID();
+    const createdAtIso = new Date().toISOString();
+
+    if (pool) {
+      const result = await withPgTx(async (client) => {
+        const lockIds = [cleanFromId, cleanToId].sort();
+        const lockRes = await client.query(
+          `SELECT id, couple_id AS "coupleId", owner_partner_id AS "ownerPartnerId", name,
+                  account_type AS "accountType", is_shared AS "isShared",
+                  initial_balance::float8 AS "initialBalance", balance::float8 AS balance,
+                  icon, color, created_at AS "createdAt"
+           FROM accounts
+           WHERE couple_id = $1 AND id = ANY($2::uuid[])
+           ORDER BY id ASC
+           FOR UPDATE`,
+          [coupleId, lockIds]
+        );
+
+        const fromRow = lockRes.rows.find((a) => a.id === cleanFromId);
+        const toRow = lockRes.rows.find((a) => a.id === cleanToId);
+        if (!fromRow || !toRow) {
+          throw new HttpError(404, 'Dompet asal atau tujuan tidak ditemukan.');
+        }
+        if (roundMoney(fromRow.balance) < numericAmount) {
+          throw new HttpError(400, 'Saldo dompet asal tidak mencukupi untuk transfer.');
+        }
+
+        await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2 AND couple_id = $3', [
+          numericAmount,
+          cleanFromId,
+          coupleId,
+        ]);
+        await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2 AND couple_id = $3', [
+          numericAmount,
+          cleanToId,
+          coupleId,
+        ]);
+
+        await client.query(
+          `INSERT INTO account_transfers(id, couple_id, partner_id, from_account_id, to_account_id, amount, note, occurred_at, created_at)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [transferId, coupleId, partnerId, cleanFromId, cleanToId, numericAmount, cleanNote, isoDate, createdAtIso]
+        );
+
+        const allRes = await client.query(
+          `SELECT a.id, a.couple_id AS "coupleId", a.owner_partner_id AS "ownerPartnerId",
+                  p.name AS "ownerPartnerName", a.name, a.account_type AS "accountType",
+                  a.is_shared AS "isShared", a.initial_balance::float8 AS "initialBalance",
+                  a.balance::float8 AS balance, a.icon, a.color, a.created_at AS "createdAt"
+           FROM accounts a
+           LEFT JOIN partners p ON p.id = a.owner_partner_id
+           WHERE a.couple_id = $1`,
+          [coupleId]
+        );
+        const fromAccount = allRes.rows.find((a) => a.id === cleanFromId);
+        const toAccount = allRes.rows.find((a) => a.id === cleanToId);
+
+        return {
+          transfer: {
+            id: transferId,
+            coupleId,
+            partnerId,
+            partnerName,
+            fromAccountId: fromAccount.id,
+            fromAccountName: fromAccount.name,
+            fromAccountIcon: fromAccount.icon,
+            toAccountId: toAccount.id,
+            toAccountName: toAccount.name,
+            toAccountIcon: toAccount.icon,
+            amount: numericAmount,
+            note: cleanNote,
+            occurredAt: isoDate,
+            createdAt: createdAtIso,
+          },
+          fromAccount,
+          toAccount,
+          totals: computeAccountTotals(allRes.rows),
+        };
+      });
+      return res.status(201).json(result);
+    }
+
+    const memAccounts = mem.accounts.get(coupleId) || [];
+    const fromAcc = memAccounts.find((a) => a.id === cleanFromId);
+    const toAcc = memAccounts.find((a) => a.id === cleanToId);
+    if (!fromAcc || !toAcc) {
+      throw new HttpError(404, 'Dompet asal atau tujuan tidak ditemukan.');
+    }
+    if (roundMoney(fromAcc.balance) < numericAmount) {
+      throw new HttpError(400, 'Saldo dompet asal tidak mencukupi untuk transfer.');
+    }
+
+    fromAcc.balance = roundMoney(fromAcc.balance - numericAmount);
+    toAcc.balance = roundMoney(toAcc.balance + numericAmount);
+
+    const trObj = {
+      id: transferId,
+      coupleId,
+      partnerId,
+      partnerName,
+      fromAccountId: cleanFromId,
+      toAccountId: cleanToId,
+      amount: numericAmount,
+      note: cleanNote,
+      occurredAt: isoDate,
+      createdAt: createdAtIso,
+      createdAtMs: Date.now(),
+    };
+    mem.transfers.get(coupleId).push(trObj);
+
+    const hydratedAccounts = memAccounts.map(hydrateMemAccount);
+    res.status(201).json({
+      transfer: hydrateMemTransfer(trObj, coupleId),
+      fromAccount: hydrateMemAccount(fromAcc),
+      toAccount: hydrateMemAccount(toAcc),
+      totals: computeAccountTotals(hydratedAccounts),
+    });
   })
 );
 
@@ -873,10 +1351,9 @@ app.post(
     if (!['income', 'expense'].includes(type)) {
       throw new HttpError(400, 'Tipe (income/expense) dan nominal (> 0) wajib valid.');
     }
-    const numericAmount = roundMoney(amount);
-    if (!Number.isFinite(Number(amount)) || numericAmount <= 0) {
-      throw new HttpError(400, 'Tipe (income/expense) dan nominal (> 0) wajib valid.');
-    }
+    const numericAmount = parseStrictNumber(amount, 'Tipe (income/expense) dan nominal (> 0) wajib valid.', {
+      exclusiveMin: 0,
+    });
     const isoDate = parseOccurredAt(occurredAt, { allowUndefined: true });
     const cleanAccountId =
       accountId === undefined || accountId === null || accountId === '' ? null : assertUuid(accountId, 'accountId');
@@ -987,11 +1464,7 @@ app.patch(
     }
     let requestedAmount;
     if (body.amount !== undefined) {
-      const n = roundMoney(body.amount);
-      if (!Number.isFinite(Number(body.amount)) || n <= 0) {
-        throw new HttpError(400, 'Nominal transaksi harus lebih dari 0.');
-      }
-      requestedAmount = n;
+      requestedAmount = parseStrictNumber(body.amount, 'Nominal transaksi harus lebih dari 0.', { exclusiveMin: 0 });
     }
     let requestedOccurredAt;
     if (body.occurredAt !== undefined) {
@@ -1313,10 +1786,9 @@ const upsertBudgetHandler = asyncHandler(async (req, res) => {
     throw new HttpError(400, 'Format bulan harus YYYY-MM.');
   }
   const monthStr = validateMonth(month);
-  const cleanLimit = roundMoney(limitAmount);
-  if (!Number.isFinite(Number(limitAmount)) || cleanLimit <= 0) {
-    throw new HttpError(400, 'Batas anggaran (limitAmount) harus lebih dari 0.');
-  }
+  const cleanLimit = parseStrictNumber(limitAmount, 'Batas anggaran (limitAmount) harus lebih dari 0.', {
+    exclusiveMin: 0,
+  });
 
   if (pool) {
     const cRes = await pool.query('SELECT id, name, icon, color FROM categories WHERE id = $1 AND couple_id = $2', [
@@ -1398,10 +1870,9 @@ app.patch(
     const { limitAmount } = req.body || {};
     const tz = parseTzOffset(req.query.tzOffset ?? req.body?.tzOffset);
 
-    const cleanLimit = roundMoney(limitAmount);
-    if (!Number.isFinite(Number(limitAmount)) || cleanLimit <= 0) {
-      throw new HttpError(400, 'Batas anggaran (limitAmount) harus lebih dari 0.');
-    }
+    const cleanLimit = parseStrictNumber(limitAmount, 'Batas anggaran (limitAmount) harus lebih dari 0.', {
+      exclusiveMin: 0,
+    });
 
     if (pool) {
       const upd = await pool.query(
@@ -1483,9 +1954,11 @@ app.get(
       );
       return res.json(r.rows);
     }
-    const notes = [...(mem.notes.get(coupleId) || [])].sort(
-      (a, b) => Number(b.isPinned) - Number(a.isPinned) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
+    const notes = [...(mem.notes.get(coupleId) || [])]
+      .sort(
+        (a, b) => Number(b.isPinned) - Number(a.isPinned) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      )
+      .map(hydrateMemNote);
     res.json(notes);
   })
 );
@@ -1535,10 +2008,125 @@ app.post(
         'INSERT INTO shared_notes(id, couple_id, author_partner_id, category_id, title, content, is_pinned, updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
         [noteObj.id, coupleId, authorPartnerId, noteObj.categoryId, noteObj.title, noteObj.content, noteObj.isPinned, noteObj.updatedAt]
       );
-    } else {
-      mem.notes.get(coupleId).push(noteObj);
+      return res.status(201).json(noteObj);
     }
-    res.status(201).json(noteObj);
+    mem.notes.get(coupleId).push(noteObj);
+    res.status(201).json(hydrateMemNote(noteObj));
+  })
+);
+
+app.patch(
+  '/api/notes/:id',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const noteId = assertUuid(req.params.id, 'noteId');
+    const body = req.body || {};
+
+    if (body.title !== undefined && (!body.title || String(body.title).trim().length < 2)) {
+      throw new HttpError(400, 'Judul catatan minimal 2 karakter.');
+    }
+
+    let hasCategoryChange = false;
+    let requestedCategoryId = null;
+    if ('categoryId' in body && body.categoryId !== undefined) {
+      hasCategoryChange = true;
+      requestedCategoryId =
+        body.categoryId === null || body.categoryId === '' ? null : assertUuid(body.categoryId, 'categoryId');
+    }
+
+    if (pool) {
+      const updated = await withPgTx(async (client) => {
+        const curRes = await client.query(
+          `SELECT id, couple_id AS "coupleId", author_partner_id AS "authorPartnerId",
+                  category_id AS "categoryId", title, content, is_pinned AS "isPinned", updated_at AS "updatedAt"
+           FROM shared_notes WHERE id = $1 AND couple_id = $2 FOR UPDATE`,
+          [noteId, coupleId]
+        );
+        if (!curRes.rowCount) {
+          throw new HttpError(404, 'Catatan tidak ditemukan.');
+        }
+        const cur = curRes.rows[0];
+        const nextCategoryId = hasCategoryChange ? requestedCategoryId : cur.categoryId;
+        if (nextCategoryId) {
+          const cRes = await client.query('SELECT id FROM categories WHERE id = $1 AND couple_id = $2', [
+            nextCategoryId,
+            coupleId,
+          ]);
+          if (!cRes.rowCount) {
+            throw new HttpError(404, 'Kategori tidak ditemukan.');
+          }
+        }
+        const nextTitle = body.title !== undefined ? String(body.title).trim() : cur.title;
+        const nextContent = body.content !== undefined ? String(body.content ?? '') : cur.content;
+        const nextPinned = body.isPinned !== undefined ? Boolean(body.isPinned) : cur.isPinned;
+        const nextUpdatedAt = new Date().toISOString();
+
+        await client.query(
+          `UPDATE shared_notes
+           SET title = $1, content = $2, category_id = $3, is_pinned = $4, updated_at = $5
+           WHERE id = $6 AND couple_id = $7`,
+          [nextTitle, nextContent, nextCategoryId, nextPinned, nextUpdatedAt, noteId, coupleId]
+        );
+
+        const joined = await client.query(
+          `SELECT n.id, n.couple_id AS "coupleId", n.author_partner_id AS "authorPartnerId", p.name AS "authorName",
+                  n.category_id AS "categoryId", n.title, n.content, n.is_pinned AS "isPinned", n.updated_at AS "updatedAt"
+           FROM shared_notes n JOIN partners p ON p.id = n.author_partner_id
+           WHERE n.id = $1 AND n.couple_id = $2`,
+          [noteId, coupleId]
+        );
+        return joined.rows[0];
+      });
+      return res.json(updated);
+    }
+
+    const list = mem.notes.get(coupleId) || [];
+    const note = list.find((n) => n.id === noteId);
+    if (!note) {
+      throw new HttpError(404, 'Catatan tidak ditemukan.');
+    }
+    const nextCategoryId = hasCategoryChange ? requestedCategoryId : note.categoryId;
+    if (nextCategoryId) {
+      const cat = (mem.categories.get(coupleId) || []).find((c) => c.id === nextCategoryId);
+      if (!cat) throw new HttpError(404, 'Kategori tidak ditemukan.');
+    }
+
+    if (body.title !== undefined) note.title = String(body.title).trim();
+    if (body.content !== undefined) note.content = String(body.content ?? '');
+    if (hasCategoryChange) note.categoryId = nextCategoryId;
+    if (body.isPinned !== undefined) note.isPinned = Boolean(body.isPinned);
+    note.updatedAt = new Date().toISOString();
+
+    res.json(hydrateMemNote(note));
+  })
+);
+
+app.delete(
+  '/api/notes/:id',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const noteId = assertUuid(req.params.id, 'noteId');
+
+    if (pool) {
+      const del = await pool.query('DELETE FROM shared_notes WHERE id = $1 AND couple_id = $2 RETURNING id', [
+        noteId,
+        coupleId,
+      ]);
+      if (!del.rowCount) {
+        throw new HttpError(404, 'Catatan tidak ditemukan.');
+      }
+      return res.json({ ok: true, id: noteId });
+    }
+
+    const list = mem.notes.get(coupleId) || [];
+    const idx = list.findIndex((n) => n.id === noteId);
+    if (idx < 0) {
+      throw new HttpError(404, 'Catatan tidak ditemukan.');
+    }
+    list.splice(idx, 1);
+    res.json({ ok: true, id: noteId });
   })
 );
 
@@ -1782,6 +2370,214 @@ app.get(
   })
 );
 
+function escapeCsvCell(value) {
+  const raw = String(value ?? '');
+  const s = /^[\t\r\n ]*[=+\-@]|^[\t\r\n]/.test(raw) ? `'${raw}` : raw;
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+app.get(
+  '/api/export',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const tz = parseTzOffset(req.query.tzOffset);
+    const monthStr = validateMonth(req.query.month, { required: true, defaultTzOffset: tz });
+    const bounds = getMonthBounds(monthStr, tz);
+    const format = String(req.query.format || 'json').trim().toLowerCase();
+    if (!['json', 'csv'].includes(format)) {
+      throw new HttpError(400, 'Format ekspor harus json atau csv.');
+    }
+
+    let couple;
+    let partners = [];
+    let categories = [];
+    let accounts = [];
+    let transactions = [];
+    let budgetRows = [];
+    let transfers = [];
+
+    if (pool) {
+      const [cSpaceRes, pRes, cRes, aRes, tRes, bRes, trRes] = await Promise.all([
+        pool.query('SELECT id, couple_name AS "coupleName", invite_code AS "inviteCode" FROM couples WHERE id = $1', [
+          coupleId,
+        ]),
+        pool.query(
+          'SELECT id, couple_id AS "coupleId", name, role_label AS "roleLabel", avatar_color AS "avatarColor" FROM partners WHERE couple_id = $1 ORDER BY created_at ASC',
+          [coupleId]
+        ),
+        pool.query(
+          'SELECT id, name, icon, color, target_amount::float8 AS "targetAmount" FROM categories WHERE couple_id = $1 ORDER BY is_default DESC, created_at ASC',
+          [coupleId]
+        ),
+        pool.query(
+          'SELECT id, is_shared AS "isShared", balance::float8 AS balance FROM accounts WHERE couple_id = $1',
+          [coupleId]
+        ),
+        pool.query(
+          `SELECT t.id, t.couple_id AS "coupleId", t.partner_id AS "partnerId", p.name AS "partnerName",
+                  t.category_id AS "categoryId", c.name AS "categoryName", c.icon AS "categoryIcon",
+                  t.account_id AS "accountId", a.name AS "accountName", a.icon AS "accountIcon",
+                  t.type, t.amount::float8 AS amount, t.note, t.occurred_at AS "occurredAt"
+           FROM transactions t
+           JOIN partners p ON p.id = t.partner_id
+           JOIN categories c ON c.id = t.category_id
+           LEFT JOIN accounts a ON a.id = t.account_id
+           WHERE t.couple_id = $1 AND t.occurred_at >= $2 AND t.occurred_at < $3
+           ORDER BY t.occurred_at DESC, t.created_at DESC`,
+          [coupleId, bounds.startIso, bounds.endIso]
+        ),
+        pool.query(
+          `SELECT b.id, b.couple_id AS "coupleId", b.category_id AS "categoryId",
+                  c.name AS "categoryName", c.icon AS "categoryIcon", c.color AS "categoryColor",
+                  b.month, b.limit_amount::float8 AS "limitAmount"
+           FROM budgets b
+           JOIN categories c ON c.id = b.category_id
+           WHERE b.couple_id = $1 AND b.month = $2
+           ORDER BY c.name ASC`,
+          [coupleId, monthStr]
+        ),
+        pool.query(
+          `SELECT t.id, t.couple_id AS "coupleId", t.partner_id AS "partnerId", p.name AS "partnerName",
+                  t.from_account_id AS "fromAccountId", fa.name AS "fromAccountName", fa.icon AS "fromAccountIcon",
+                  t.to_account_id AS "toAccountId", ta.name AS "toAccountName", ta.icon AS "toAccountIcon",
+                  t.amount::float8 AS amount, t.note, t.occurred_at AS "occurredAt", t.created_at AS "createdAt"
+           FROM account_transfers t
+           JOIN partners p ON p.id = t.partner_id
+           LEFT JOIN accounts fa ON fa.id = t.from_account_id
+           LEFT JOIN accounts ta ON ta.id = t.to_account_id
+           WHERE t.couple_id = $1 AND t.occurred_at >= $2 AND t.occurred_at < $3
+           ORDER BY t.occurred_at DESC, t.created_at DESC`,
+          [coupleId, bounds.startIso, bounds.endIso]
+        ),
+      ]);
+      couple = { ...cSpaceRes.rows[0], partners: pRes.rows };
+      partners = pRes.rows;
+      categories = cRes.rows;
+      accounts = aRes.rows;
+      transactions = tRes.rows;
+      budgetRows = bRes.rows;
+      transfers = trRes.rows;
+    } else {
+      const memCouple = mem.couples.get(coupleId);
+      partners = Array.from(mem.partners.values())
+        .filter((p) => p.coupleId === coupleId)
+        .sort((a, b) => a.createdAtMs - b.createdAtMs)
+        .map(({ id, coupleId: cId, name, roleLabel, avatarColor }) => ({
+          id,
+          coupleId: cId,
+          name,
+          roleLabel,
+          avatarColor,
+        }));
+      couple = { ...memCouple, partners };
+      categories = mem.categories.get(coupleId) || [];
+      accounts = mem.accounts.get(coupleId) || [];
+      transactions = [...(mem.transactions.get(coupleId) || [])]
+        .filter((tx) => {
+          const ms = new Date(tx.occurredAt).getTime();
+          return ms >= bounds.startMs && ms < bounds.endMs;
+        })
+        .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime() || b.createdAtMs - a.createdAtMs)
+        .map((tx) => hydrateMemTx(tx, coupleId));
+      const catById = new Map(categories.map((c) => [c.id, c]));
+      budgetRows = (mem.budgets.get(coupleId) || [])
+        .filter((b) => b.month === monthStr)
+        .map((b) => {
+          const cat = catById.get(b.categoryId);
+          return {
+            id: b.id,
+            coupleId: b.coupleId,
+            categoryId: b.categoryId,
+            categoryName: cat ? cat.name : '',
+            categoryIcon: cat ? cat.icon : '✨',
+            categoryColor: cat ? cat.color : DEFAULT_CATEGORY_COLOR,
+            month: b.month,
+            limitAmount: b.limitAmount,
+          };
+        })
+        .sort((a, b) => a.categoryName.localeCompare(b.categoryName));
+      transfers = [...(mem.transfers.get(coupleId) || [])]
+        .filter((tr) => {
+          const ms = new Date(tr.occurredAt).getTime();
+          return ms >= bounds.startMs && ms < bounds.endMs;
+        })
+        .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime() || b.createdAtMs - a.createdAtMs)
+        .map((tr) => hydrateMemTransfer(tr, coupleId));
+    }
+
+    if (format === 'csv') {
+      const header = ['Tanggal', 'Tipe', 'Kategori', 'Dompet', 'Pasangan', 'Nominal', 'Catatan'].join(',');
+      const lines = transactions.map((tx) =>
+        [
+          new Date(new Date(tx.occurredAt).getTime() + tz * 60_000).toISOString().slice(0, 10),
+          tx.type === 'income' ? 'Pemasukan' : 'Pengeluaran',
+          tx.categoryName,
+          tx.accountName || 'Tanpa Dompet',
+          tx.partnerName,
+          roundMoney(tx.amount),
+          tx.note || '',
+        ]
+          .map(escapeCsvCell)
+          .join(',')
+      );
+      const csvBody = [header, ...lines].join('\r\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="duasaku-${monthStr}.csv"`);
+      return res.send(csvBody);
+    }
+
+    let totalIncome = 0;
+    let totalExpense = 0;
+    const spentMap = new Map();
+    for (const tx of transactions) {
+      const amt = roundMoney(tx.amount);
+      if (tx.type === 'income') {
+        totalIncome = roundMoney(totalIncome + amt);
+      } else {
+        totalExpense = roundMoney(totalExpense + amt);
+        spentMap.set(tx.categoryId, roundMoney((spentMap.get(tx.categoryId) || 0) + amt));
+      }
+    }
+    const netBalance = roundMoney(totalIncome - totalExpense);
+    const budgets = budgetRows.map((row) => buildMonthlyBudget(row, spentMap.get(row.categoryId) || 0));
+
+    res.setHeader('Content-Disposition', `attachment; filename="duasaku-${monthStr}.json"`);
+    res.json({
+      exportedAt: new Date().toISOString(),
+      month: monthStr,
+      tzOffset: tz,
+      couple,
+      summary: {
+        month: monthStr,
+        totalIncome,
+        totalExpense,
+        netBalance,
+      },
+      analytics: {
+        month: monthStr,
+        totals: {
+          totalIncome,
+          totalExpense,
+          netBalance,
+          savingsRate: totalIncome > 0 ? Math.round((netBalance / totalIncome) * 1000) / 10 : 0,
+          transactionCount: transactions.length,
+        },
+        accountsOverview: {
+          ...computeAccountTotals(accounts),
+          accountsCount: accounts.length,
+        },
+      },
+      budgets,
+      transactions,
+      transfers,
+    });
+  })
+);
+
 // JSON 404 fallback for unknown /api routes
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Endpoint tidak ditemukan.' });
@@ -1819,6 +2615,8 @@ app.use((err, _req, res, _next) => {
   return res.status(500).json({ error: 'Terjadi kesalahan pada server.' });
 });
 
+export { app, initDb };
+
 export function startServer(port = Number(process.env.PORT || 4100)) {
   return initDb().then(() => {
     return new Promise((resolve) => {
@@ -1844,6 +2642,7 @@ export async function cleanupCouple(coupleId) {
   if (!coupleId) return;
   if (pool) {
     await withPgTx(async (client) => {
+      await client.query('DELETE FROM account_transfers WHERE couple_id = $1', [coupleId]);
       await client.query('DELETE FROM transactions WHERE couple_id = $1', [coupleId]);
       await client.query('DELETE FROM budgets WHERE couple_id = $1', [coupleId]);
       await client.query('DELETE FROM shared_notes WHERE couple_id = $1', [coupleId]);
@@ -1852,6 +2651,7 @@ export async function cleanupCouple(coupleId) {
     });
     return;
   }
+  mem.transfers.delete(coupleId);
   mem.transactions.delete(coupleId);
   mem.budgets.delete(coupleId);
   mem.notes.delete(coupleId);

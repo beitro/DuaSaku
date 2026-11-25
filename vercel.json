@@ -1,0 +1,11 @@
+{
+  "installCommand": "npm install --legacy-peer-deps --no-package-lock",
+  "buildCommand": "echo ok",
+  "outputDirectory": "vercel-public",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/[[...path]].mjs"
+    }
+  ]
+}

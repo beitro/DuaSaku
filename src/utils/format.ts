@@ -55,7 +55,9 @@ export function formatSignedRp(amount: number, type: 'income' | 'expense'): stri
 }
 
 export function parseIdrInput(raw: string): number {
-  const digits = raw.replace(/[^0-9]/g, '');
+  const cleaned = raw.trim().replace(/(?:,-|\/-|\.-)$/, '').trim();
+  const withoutDecimal = cleaned.replace(/[.,]\d{1,2}$/, '');
+  const digits = withoutDecimal.replace(/[^0-9]/g, '');
   if (!digits) return 0;
   const parsed = Number(digits);
   if (!Number.isFinite(parsed)) return 0;

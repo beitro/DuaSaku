@@ -88,3 +88,18 @@ CREATE TABLE IF NOT EXISTS budgets (
 
 CREATE INDEX IF NOT EXISTS idx_budgets_couple_month
   ON budgets(couple_id, month);
+
+CREATE TABLE IF NOT EXISTS account_transfers (
+  id UUID PRIMARY KEY,
+  couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  from_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+  to_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+  amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+  note TEXT NOT NULL DEFAULT '',
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_transfers_couple_occurred
+  ON account_transfers(couple_id, occurred_at DESC);

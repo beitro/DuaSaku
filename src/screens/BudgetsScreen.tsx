@@ -125,7 +125,9 @@ export function BudgetsScreen(): React.JSX.Element {
                     b.isOverBudget ? styles.overText : styles.okText,
                   ]}
                 >
-                  {b.isOverBudget ? 'Melebihi Batas!' : `${Math.round(b.progressPercent)}%`}
+                  {b.isOverBudget
+                    ? `Melebihi Batas! (${Math.round(b.progressPercent)}%)`
+                    : `${Math.round(b.progressPercent)}%`}
                 </Text>
               </View>
               <View style={styles.track}>

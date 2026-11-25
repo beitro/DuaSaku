@@ -13,13 +13,23 @@ import {
 } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
+import type { SharedNote } from '../types';
 import { formatShortDateId } from '../utils/format';
 
 export function NotesScreen(): React.JSX.Element {
-  const { notes, categories, loading, createNote } = useDuaSaku();
+  const {
+    notes,
+    categories,
+    loading,
+    createNote,
+    updateNote,
+    deleteNote,
+    requestConfirm,
+  } = useDuaSaku();
   const { height } = useWindowDimensions();
 
   const [showModal, setShowModal] = useState(false);
+  const [editingNote, setEditingNote] = useState<SharedNote | null>(null);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
@@ -31,10 +41,29 @@ export function NotesScreen(): React.JSX.Element {
   }, [categories]);
 
   const sortedNotes = useMemo(() => {
-    return [...notes].sort((a, b) => Number(b.isPinned) - Number(a.isPinned));
+    return [...notes].sort(
+      (a, b) =>
+        Number(b.isPinned) - Number(a.isPinned) ||
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
   }, [notes]);
 
-  const openModal = () => {
+  const openCreateModal = () => {
+    setEditingNote(null);
+    setTitle('');
+    setContent('');
+    setSelectedCatId(null);
+    setIsPinned(true);
+    setFormError(null);
+    setShowModal(true);
+  };
+
+  const openEditModal = (note: SharedNote) => {
+    setEditingNote(note);
+    setTitle(note.title);
+    setContent(note.content);
+    setSelectedCatId(note.categoryId);
+    setIsPinned(note.isPinned);
     setFormError(null);
     setShowModal(true);
   };
@@ -42,6 +71,7 @@ export function NotesScreen(): React.JSX.Element {
   const closeModal = () => {
     if (loading) return;
     setShowModal(false);
+    setEditingNote(null);
     setFormError(null);
   };
 
@@ -54,12 +84,22 @@ export function NotesScreen(): React.JSX.Element {
     }
 
     try {
-      await createNote({
-        title: trimmedTitle,
-        content: content.trim(),
-        categoryId: selectedCatId,
-        isPinned,
-      });
+      if (editingNote) {
+        await updateNote(editingNote.id, {
+          title: trimmedTitle,
+          content: content.trim(),
+          categoryId: selectedCatId,
+          isPinned,
+        });
+      } else {
+        await createNote({
+          title: trimmedTitle,
+          content: content.trim(),
+          categoryId: selectedCatId,
+          isPinned,
+        });
+      }
+      setEditingNote(null);
       setTitle('');
       setContent('');
       setSelectedCatId(null);
@@ -68,6 +108,25 @@ export function NotesScreen(): React.JSX.Element {
     } catch {
       // Error surfaced via FeedbackBanner
     }
+  };
+
+  const handleTogglePin = async (note: SharedNote) => {
+    try {
+      await updateNote(note.id, { isPinned: !note.isPinned });
+    } catch {
+      // Error surfaced via FeedbackBanner
+    }
+  };
+
+  const handleDeletePress = (note: SharedNote) => {
+    requestConfirm({
+      title: 'Hapus Catatan?',
+      message: `Hapus catatan "${note.title}"? Tindakan ini tidak dapat dibatalkan.`,
+      confirmLabel: 'Hapus',
+      cancelLabel: 'Batal',
+      destructive: true,
+      onConfirm: () => deleteNote(note.id),
+    });
   };
 
   return (
@@ -81,7 +140,7 @@ export function NotesScreen(): React.JSX.Element {
         </View>
         <TouchableOpacity
           style={styles.addBtn}
-          onPress={openModal}
+          onPress={openCreateModal}
           accessibilityRole="button"
           testID="notes-add-btn"
         >
@@ -118,6 +177,37 @@ export function NotesScreen(): React.JSX.Element {
               <Text style={styles.metaText}>
                 Ditulis oleh {note.authorName} · {formatShortDateId(note.updatedAt)}
               </Text>
+              <View style={styles.cardActionsRow}>
+                <TouchableOpacity
+                  style={styles.actionPill}
+                  onPress={() => handleTogglePin(note)}
+                  disabled={loading}
+                  accessibilityRole="button"
+                  testID={`note-pin-action-${note.id}`}
+                >
+                  <Text style={styles.actionPillText}>
+                    {note.isPinned ? 'Lepas Pin' : 'Sematkan'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.actionPill}
+                  onPress={() => openEditModal(note)}
+                  disabled={loading}
+                  accessibilityRole="button"
+                  testID={`note-edit-${note.id}`}
+                >
+                  <Text style={styles.actionPillText}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionPill, styles.deletePill]}
+                  onPress={() => handleDeletePress(note)}
+                  disabled={loading}
+                  accessibilityRole="button"
+                  testID={`note-delete-${note.id}`}
+                >
+                  <Text style={styles.deletePillText}>Hapus</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           );
         })
@@ -142,7 +232,9 @@ export function NotesScreen(): React.JSX.Element {
               keyboardShouldPersistTaps="handled"
             >
               <View style={styles.modalCard}>
-                <Text style={styles.modalTitle}>Catatan Baru untuk Pasangan</Text>
+                <Text style={styles.modalTitle}>
+                  {editingNote ? 'Edit Catatan Bersama' : 'Catatan Baru untuk Pasangan'}
+                </Text>
 
                 <Text style={styles.label}>Judul</Text>
                 <TextInput
@@ -250,7 +342,9 @@ export function NotesScreen(): React.JSX.Element {
                     {loading ? (
                       <ActivityIndicator color={COLORS.white} size="small" />
                     ) : (
-                      <Text style={styles.saveBtnText}>Simpan Catatan</Text>
+                      <Text style={styles.saveBtnText}>
+                        {editingNote ? 'Simpan Perubahan' : 'Simpan Catatan'}
+                      </Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -368,6 +462,35 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.textMuted,
     marginTop: SPACING.sm,
+  },
+  cardActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginTop: SPACING.sm + 2,
+  },
+  actionPill: {
+    backgroundColor: COLORS.warmSand,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.pill,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 5,
+  },
+  actionPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  deletePill: {
+    backgroundColor: COLORS.terracottaSoft,
+    borderColor: COLORS.terracotta,
+  },
+  deletePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.terracottaDark,
   },
   modalBackdrop: {
     flex: 1,

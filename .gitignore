@@ -3,3 +3,6 @@ node_modules/
 .expo/
 dist/
 android/
+.vercel/
+.vercel
+.env*

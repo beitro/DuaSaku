@@ -9,7 +9,10 @@
     "api": "node server/index.mjs",
     "db:migrate": "node server/migrate.mjs",
     "lint": "tsc --noEmit",
-    "test:api": "node server/test-api.mjs"
+    "test:api": "DATABASE_URL= node server/test-api.mjs",
+    "test:api:pg": "node server/test-api.mjs",
+    "test:vercel": "DATABASE_URL= node server/test-vercel.mjs",
+    "test:e2e": "node e2e/run-e2e.mjs --tier=all"
   },
   "dependencies": {
     "@expo/metro-runtime": "~58.0.17",

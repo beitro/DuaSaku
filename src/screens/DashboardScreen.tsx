@@ -25,7 +25,7 @@ export function DashboardScreen(): React.JSX.Element {
       {/* Hero Balance Card */}
       <View style={styles.heroCard}>
         <Text style={styles.heroKicker}>
-          Ringkasan — {formatMonthLabel(selectedMonth)}
+          Saldo Bersih — {formatMonthLabel(selectedMonth)}
         </Text>
         <Text style={styles.heroAmount}>
           {formatRp(summary?.netBalance ?? 0)}

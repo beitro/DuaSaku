@@ -572,5 +572,146 @@ export function getTier4Tests() {
         assertEqual(errs.serverErrors.length, 0, `HTTP 5xx errors: ${JSON.stringify(errs.serverErrors)}`);
       },
     },
+    {
+      id: 'T4-WEB-06',
+      tier: 4,
+      feature: 'F7',
+      features: ['F7', 'F8'],
+      kind: 'browser',
+      description: 'Web Scenario 6: Pos & Target edit/delete + Catatan pin/unpin, edit, and delete with ConfirmModal',
+      fn: async (ctx) => {
+        const { cdp, webUrl } = ctx;
+        cdp.clearTrackedErrors();
+        await cdp.setViewport(375, 812, true);
+        await createCoupleViaUi(cdp, webUrl, 'Kelola Pos Catatan', 'Raka');
+
+        // Pos & Target: Create -> Edit -> Delete
+        await cdp.clickByText(/Pos\s*&\s*Target|^Pos$/i, { clickableOnly: true });
+        await cdp.waitForText(/Menikah/);
+        await cdp.clickByText(/\+ Tambah Pos/i);
+        await cdp.fillInput(/Nama Kategori|Cicilan/i, 'Pos Uji Web');
+        await cdp.fillInput(/25000000/i, '500000');
+        await cdp.clickByText('Tambah Pos', { exact: true, last: true });
+        await cdp.waitForText('Pos Uji Web');
+
+        await cdp.clickByText('Edit', { exact: true, last: true });
+        await cdp.waitForText('Edit Pos Keuangan');
+        await cdp.fillInput(/Nama Kategori|Cicilan/i, 'Pos Uji Diubah');
+        await cdp.clickByText('Simpan Perubahan', { exact: true, last: true });
+        await cdp.waitForText('Pos Uji Diubah');
+
+        await cdp.clickByText('Hapus', { exact: true, last: true });
+        await cdp.waitForText('Batal');
+        await cdp.clickByText('Hapus', { exact: true, last: true });
+        await cdp.waitForGoneText('Pos Uji Diubah');
+
+        // Catatan: Create -> Unpin/Pin -> Edit -> Delete
+        await cdp.clickByText(/^(?:📝\s*)?Catatan$/i, { clickableOnly: true });
+        await cdp.clickByText(/\+ Catatan/i);
+        await cdp.fillInput(/Judul|Vendor/i, 'Catatan Pertama');
+        await cdp.fillInput(/Isi|rencana/i, 'Detail awal catatan');
+        await cdp.clickByText('Simpan Catatan', { exact: true, last: true });
+        await cdp.waitForText('Catatan Pertama');
+        await cdp.waitForText('Lepas Pin');
+
+        await cdp.clickByText('Lepas Pin', { exact: true });
+        await cdp.waitForText('Sematkan');
+        await cdp.clickByText('Sematkan', { exact: true });
+        await cdp.waitForText('Lepas Pin');
+
+        await cdp.clickByText('Edit', { exact: true, last: true });
+        await cdp.waitForText('Edit Catatan Bersama');
+        await cdp.fillInput(/Judul|Vendor/i, 'Catatan Diedit');
+        await cdp.clickByText('Simpan Perubahan', { exact: true, last: true });
+        await cdp.waitForText('Catatan Diedit');
+
+        await cdp.clickByText('Hapus', { exact: true, last: true });
+        await cdp.waitForText('Batal');
+        await cdp.clickByText('Hapus', { exact: true, last: true });
+        await cdp.waitForGoneText('Catatan Diedit');
+
+        const audit = await cdp.getDomAudit();
+        assert(audit.scrollWidth <= 375, `Mobile overflow on T4-WEB-06: ${audit.scrollWidth}`);
+        assertEqual(audit.contrastFailures.length, 0, `WCAG failure: ${JSON.stringify(audit.contrastFailures)}`);
+        const errs = cdp.getErrors();
+        assertEqual(errs.exceptions.length, 0, `Exceptions: ${JSON.stringify(errs.exceptions)}`);
+        assertEqual(errs.consoleErrors.length, 0, `Console errors: ${JSON.stringify(errs.consoleErrors)}`);
+        assertEqual(errs.serverErrors.length, 0, `HTTP 5xx errors: ${JSON.stringify(errs.serverErrors)}`);
+      },
+    },
+    {
+      id: 'T4-WEB-07',
+      tier: 4,
+      feature: 'F5',
+      features: ['F5', 'F7', 'F8'],
+      kind: 'browser',
+      description: 'Web Scenario 7: Wallet-to-Wallet Transfer + Couple Profile rename & CSV/JSON Export on mobile 375x812',
+      fn: async (ctx) => {
+        const { cdp, webUrl } = ctx;
+        cdp.clearTrackedErrors();
+        await cdp.setViewport(375, 812, true);
+        await createCoupleViaUi(cdp, webUrl, 'Ruang Awal', 'Raka');
+
+        // Create 2 wallets on Dompet tab
+        await cdp.clickByText('Dompet', { exact: true, last: true });
+        await cdp.clickByText('+ Dompet', { exact: true });
+        await cdp.fillInput(/BCA Bersama/i, 'Dompet A');
+        await cdp.fillInput(/^0$/, '1000000');
+        await cdp.clickByText('Simpan', { exact: true, last: true });
+        await cdp.waitForText('Dompet A');
+
+        await cdp.clickByText('+ Dompet', { exact: true });
+        await cdp.fillInput(/BCA Bersama/i, 'Dompet B');
+        await cdp.fillInput(/^0$/, '500000');
+        await cdp.clickByText('Simpan', { exact: true, last: true });
+        await cdp.waitForText('Dompet B');
+
+        // Transfer 250000 from Dompet A to Dompet B
+        await cdp.clickByText(/Transfer/i, { clickableOnly: true });
+        await cdp.waitForText('Transfer Antar Dompet');
+        await cdp.clickByText(/Dompet A/, { last: false });
+        await cdp.clickByText(/Dompet B/, { last: true });
+        await cdp.fillInput(/250000/i, '250000');
+        await cdp.fillInput(/Topup tabungan/i, 'Pindah saldo');
+        await cdp.clickByText('Kirim Transfer', { exact: true });
+        await cdp.waitForGoneText('Transfer Antar Dompet');
+        await cdp.waitForText('Rp 750.000');
+        await cdp.waitForText('Riwayat Transfer Dompet');
+        await cdp.waitForText('Pindah saldo');
+
+        // Verify Ringkas totals remain Rp 0 (transfer is non-income/non-expense)
+        await cdp.clickByText('Ringkas', { exact: true, last: true });
+        await cdp.waitForText('Selama Sebulan');
+        const ringkasText = await cdp.getBodyText();
+        assert(!ringkasText.includes('Rp 250.000'), 'Transfer must not appear as monthly income/expense on Ringkas');
+
+        // Edit Couple Profile & Export CSV/JSON
+        await cdp.clickByText(/Profil\s*&\s*Ekspor/i, { clickableOnly: true });
+        await cdp.waitForText('Edit Profil Pasangan');
+        await cdp.fillInput(/Dompet Masa Depan/i, 'Keluarga Bahagia');
+        await cdp.fillInput(/Contoh: Raka/i, 'Raka Updated');
+        await cdp.clickByText('Simpan Profil', { exact: true });
+        await cdp.waitForGoneText('Edit Profil Pasangan');
+        await cdp.waitForText('Keluarga Bahagia');
+        await cdp.waitForText(/Raka Updated/);
+
+        await cdp.clickByText(/Profil\s*&\s*Ekspor/i, { clickableOnly: true });
+        await cdp.waitForText('Ekspor CSV');
+        await cdp.clickByText('Ekspor CSV', { exact: true });
+        await cdp.waitForText(/CSV.*berhasil diekspor/i);
+        await cdp.clickByText('Ekspor JSON', { exact: true });
+        await cdp.waitForText(/JSON.*berhasil diekspor/i);
+        await cdp.clickByText('Tutup', { exact: true });
+        await cdp.waitForGoneText('Edit Profil Pasangan');
+
+        const audit = await cdp.getDomAudit();
+        assert(audit.scrollWidth <= 375, `Mobile overflow on T4-WEB-07: ${audit.scrollWidth}`);
+        assertEqual(audit.contrastFailures.length, 0, `WCAG failure: ${JSON.stringify(audit.contrastFailures)}`);
+        const errs = cdp.getErrors();
+        assertEqual(errs.exceptions.length, 0, `Exceptions: ${JSON.stringify(errs.exceptions)}`);
+        assertEqual(errs.consoleErrors.length, 0, `Console errors: ${JSON.stringify(errs.consoleErrors)}`);
+        assertEqual(errs.serverErrors.length, 0, `HTTP 5xx errors: ${JSON.stringify(errs.serverErrors)}`);
+      },
+    },
   ];
 }

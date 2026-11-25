@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -12,6 +12,7 @@ import { AppFrame } from './src/components/AppFrame';
 import { ConfirmModal } from './src/components/ConfirmModal';
 import { FeedbackBanner } from './src/components/FeedbackBanner';
 import { MonthSelector } from './src/components/MonthSelector';
+import { ProfileExportModal } from './src/components/ProfileExportModal';
 import { QuickEntrySheet } from './src/components/QuickEntrySheet';
 import { DuaSakuProvider, useDuaSaku } from './src/context/DuaSakuContext';
 import { AccountsScreen } from './src/screens/AccountsScreen';
@@ -47,6 +48,7 @@ function AppContent(): React.JSX.Element {
     me,
     hydrating,
     loading,
+    refreshing,
     activeTab,
     setActiveTab,
     selectedMonth,
@@ -58,8 +60,22 @@ function AppContent(): React.JSX.Element {
     executeConfirm,
     openNewTransaction,
     requestConfirm,
+    refreshAll,
     logout,
   } = useDuaSaku();
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+
+  const handleLogoutPress = () => {
+    requestConfirm({
+      title: 'Keluar dari Ruang?',
+      message:
+        'Anda akan keluar dari sesi pasangan di perangkat ini. Simpan kode undangan untuk bergabung kembali.',
+      confirmLabel: 'Keluar',
+      cancelLabel: 'Batal',
+      destructive: true,
+      onConfirm: logout,
+    });
+  };
 
   if (hydrating) {
     return (
@@ -73,7 +89,7 @@ function AppContent(): React.JSX.Element {
     );
   }
 
-  if (!token || !couple || !me) {
+  if (!token || !me) {
     return (
       <>
         <StatusBar style="dark" />
@@ -82,17 +98,53 @@ function AppContent(): React.JSX.Element {
     );
   }
 
-  const handleLogoutPress = () => {
-    requestConfirm({
-      title: 'Keluar dari Ruang?',
-      message:
-        'Anda akan keluar dari sesi pasangan di perangkat ini. Simpan kode undangan untuk bergabung kembali.',
-      confirmLabel: 'Keluar',
-      cancelLabel: 'Batal',
-      destructive: true,
-      onConfirm: logout,
-    });
-  };
+  if (!couple) {
+    return (
+      <AppFrame>
+        <StatusBar style="dark" />
+        <View style={styles.offlineBox}>
+          <FeedbackBanner feedback={feedback} onDismiss={clearFeedback} />
+          <Text style={styles.offlineTitle}>Tidak Dapat Terhubung ke Server</Text>
+          <Text style={styles.offlineText}>
+            Sesi Anda sebagai {me.name} masih tersimpan. Periksa koneksi internet lalu coba muat
+            ulang ruang pasangan.
+          </Text>
+          <TouchableOpacity
+            style={[styles.retryBtn, refreshing && styles.retryBtnDisabled]}
+            onPress={refreshAll}
+            disabled={refreshing}
+            accessibilityRole="button"
+            testID="retry-sync-btn"
+          >
+            {refreshing ? (
+              <ActivityIndicator color={COLORS.white} />
+            ) : (
+              <Text style={styles.retryBtnText}>Coba Muat Ulang</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.offlineLogoutBtn}
+            onPress={handleLogoutPress}
+            accessibilityRole="button"
+            testID="offline-logout-btn"
+          >
+            <Text style={styles.logoutBtnText}>Keluar dari Sesi</Text>
+          </TouchableOpacity>
+        </View>
+        <ConfirmModal
+          visible={Boolean(confirmState?.visible)}
+          title={confirmState?.title ?? ''}
+          message={confirmState?.message ?? ''}
+          confirmLabel={confirmState?.confirmLabel}
+          cancelLabel={confirmState?.cancelLabel}
+          destructive={confirmState?.destructive}
+          loading={confirmState?.loading}
+          onConfirm={executeConfirm}
+          onCancel={closeConfirm}
+        />
+      </AppFrame>
+    );
+  }
 
   return (
     <AppFrame>
@@ -174,6 +226,25 @@ function AppContent(): React.JSX.Element {
               📝 Catatan
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.utilityPill,
+              profileModalVisible && styles.utilityPillActive,
+            ]}
+            onPress={() => setProfileModalVisible(true)}
+            accessibilityRole="button"
+            testID="nav-pill-profile"
+          >
+            <Text
+              style={[
+                styles.utilityPillText,
+                profileModalVisible && styles.utilityPillTextActive,
+              ]}
+            >
+              ⚙️ Profil & Ekspor
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -229,6 +300,10 @@ function AppContent(): React.JSX.Element {
 
       {/* Global Overlays */}
       <QuickEntrySheet />
+      <ProfileExportModal
+        visible={profileModalVisible}
+        onClose={() => setProfileModalVisible(false)}
+      />
       <ConfirmModal
         visible={Boolean(confirmState?.visible)}
         title={confirmState?.title ?? ''}
@@ -264,6 +339,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.textSecondary,
+  },
+  offlineBox: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: SPACING.xl,
+    gap: SPACING.md,
+  },
+  offlineTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    textAlign: 'center',
+  },
+  offlineText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  retryBtn: {
+    backgroundColor: COLORS.terracottaBtn,
+    borderRadius: RADII.md,
+    paddingVertical: SPACING.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 46,
+  },
+  retryBtnDisabled: {
+    opacity: 0.65,
+  },
+  retryBtnText: {
+    color: COLORS.white,
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  offlineLogoutBtn: {
+    backgroundColor: COLORS.warmSand,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.md,
+    paddingVertical: SPACING.sm + 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 42,
   },
   header: {
     backgroundColor: COLORS.surface,
@@ -348,6 +467,7 @@ const styles = StyleSheet.create({
   },
   utilityRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: SPACING.sm,
   },
   utilityPill: {

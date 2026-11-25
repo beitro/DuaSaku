@@ -37,6 +37,16 @@ export interface AuthResponse {
   partner: PartnerProfile;
 }
 
+export interface UpdateCouplePayload {
+  coupleName?: string;
+  partnerName?: string;
+}
+
+export interface UpdateCoupleResponse {
+  couple: CoupleSpace;
+  partner: PartnerProfile;
+}
+
 export interface CategoryGoal {
   id: string;
   coupleId: string;
@@ -49,6 +59,13 @@ export interface CategoryGoal {
 
 export interface CreateCategoryPayload {
   name: string;
+  icon?: string;
+  color?: string;
+  targetAmount?: number;
+}
+
+export interface UpdateCategoryPayload {
+  name?: string;
   icon?: string;
   color?: string;
   targetAmount?: number;
@@ -98,6 +115,39 @@ export interface UpdateAccountPayload {
   initialBalance?: number;
   icon?: string;
   color?: string;
+}
+
+export interface AccountTransfer {
+  id: string;
+  coupleId: string;
+  partnerId: string;
+  partnerName: string;
+  fromAccountId: string | null;
+  fromAccountName: string | null;
+  fromAccountIcon: string | null;
+  toAccountId: string | null;
+  toAccountName: string | null;
+  toAccountIcon: string | null;
+  amount: number;
+  note: string;
+  occurredAt: string;
+  createdAt: string;
+}
+
+export interface TransferAccountPayload {
+  fromAccountId: string;
+  toAccountId: string;
+  amount: number;
+  note?: string;
+  occurredAt?: string;
+  date?: string;
+}
+
+export interface TransferAccountResponse {
+  transfer: AccountTransfer;
+  fromAccount: CoupleAccount;
+  toAccount: CoupleAccount;
+  totals: AccountTotals;
 }
 
 export interface CoupleTransaction {
@@ -198,6 +248,13 @@ export interface CreateNotePayload {
   isPinned?: boolean;
 }
 
+export interface UpdateNotePayload {
+  title?: string;
+  content?: string;
+  categoryId?: string | null;
+  isPinned?: boolean;
+}
+
 export interface SummaryPartnerItem {
   partnerId: string;
   partnerName: string;
@@ -281,4 +338,25 @@ export interface HealthResponse {
   ok: boolean;
   app: string;
   storage: 'postgresql' | 'memory';
+}
+
+export interface MonthlyExportJson {
+  exportedAt: string;
+  month: string;
+  tzOffset: number;
+  couple: CoupleSpace;
+  summary: {
+    month: string;
+    totalIncome: number;
+    totalExpense: number;
+    netBalance: number;
+  };
+  analytics: {
+    month: string;
+    totals: AnalyticsTotals;
+    accountsOverview: AccountsOverview;
+  };
+  budgets: MonthlyBudget[];
+  transactions: CoupleTransaction[];
+  transfers: AccountTransfer[];
 }

@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import type {
+  AccountTransfer,
   AccountsResponse,
   AuthResponse,
   BudgetsResponse,
@@ -16,10 +18,17 @@ import type {
   HealthResponse,
   MonthlyAnalytics,
   MonthlyBudget,
+  MonthlyExportJson,
   SharedNote,
   TransactionFilterParams,
+  TransferAccountPayload,
+  TransferAccountResponse,
   UpdateAccountPayload,
   UpdateBudgetPayload,
+  UpdateCategoryPayload,
+  UpdateCouplePayload,
+  UpdateCoupleResponse,
+  UpdateNotePayload,
   UpdateTransactionPayload,
   UpsertBudgetPayload,
 } from '../types';
@@ -68,6 +77,10 @@ export function getApiUrl(): string {
   }
 
   if (rawEnv) return rawEnv;
+  const extra = Constants.expoConfig?.extra as { apiUrl?: unknown } | undefined;
+  const configUrl =
+    typeof extra?.apiUrl === 'string' ? extra.apiUrl.trim().replace(/\/+$/, '') : '';
+  if (configUrl) return configUrl;
   return Platform.OS === 'android' ? 'http://10.0.2.2:4100' : 'http://localhost:4100';
 }
 
@@ -158,10 +171,19 @@ export const duaSakuApi = {
 
   getCouple: (token: string) => request<CoupleSpace>('/api/couple', { token }),
 
+  updateCouple: (token: string, payload: UpdateCouplePayload) =>
+    request<UpdateCoupleResponse>('/api/couple', { token, method: 'PATCH', body: payload }),
+
   getCategories: (token: string) => request<CategoryGoal[]>('/api/categories', { token }),
 
   createCategory: (token: string, payload: CreateCategoryPayload) =>
     request<CategoryGoal>('/api/categories', { token, method: 'POST', body: payload }),
+
+  updateCategory: (token: string, id: string, payload: UpdateCategoryPayload) =>
+    request<CategoryGoal>(`/api/categories/${id}`, { token, method: 'PATCH', body: payload }),
+
+  deleteCategory: (token: string, id: string) =>
+    request<DeleteResponse>(`/api/categories/${id}`, { token, method: 'DELETE' }),
 
   getAccounts: (token: string) => request<AccountsResponse>('/api/accounts', { token }),
 
@@ -189,6 +211,30 @@ export const duaSakuApi = {
 
   deleteAccount: (token: string, id: string) =>
     request<DeleteResponse>(`/api/accounts/${id}`, { token, method: 'DELETE' }),
+
+  getAccountTransfers: async (
+    token: string,
+    params: { month?: string; tzOffset?: number } = {}
+  ): Promise<AccountTransfer[]> => {
+    const tzOffset =
+      params.tzOffset !== undefined
+        ? params.tzOffset
+        : params.month
+          ? defaultTzOffset()
+          : undefined;
+    const query = buildQuery({ month: params.month, tzOffset });
+    const res = await request<{ transfers: AccountTransfer[] }>(`/api/accounts/transfers${query}`, {
+      token,
+    });
+    return res.transfers;
+  },
+
+  transferAccounts: (token: string, payload: TransferAccountPayload) =>
+    request<TransferAccountResponse>('/api/accounts/transfer', {
+      token,
+      method: 'POST',
+      body: payload,
+    }),
 
   getTransactions: async (
     token: string,
@@ -287,6 +333,12 @@ export const duaSakuApi = {
   createNote: (token: string, payload: CreateNotePayload) =>
     request<SharedNote>('/api/notes', { token, method: 'POST', body: payload }),
 
+  updateNote: (token: string, id: string, payload: UpdateNotePayload) =>
+    request<SharedNote>(`/api/notes/${id}`, { token, method: 'PATCH', body: payload }),
+
+  deleteNote: (token: string, id: string) =>
+    request<DeleteResponse>(`/api/notes/${id}`, { token, method: 'DELETE' }),
+
   getSummary: (token: string, params: { month?: string; tzOffset?: number } = {}) => {
     const tzOffset =
       params.tzOffset !== undefined
@@ -307,5 +359,47 @@ export const duaSakuApi = {
       tzOffset: params.tzOffset ?? defaultTzOffset(),
     });
     return request<MonthlyAnalytics>(`/api/analytics${query}`, { token });
+  },
+
+  exportMonthlyCsv: async (
+    token: string,
+    params: { month: string; tzOffset?: number }
+  ): Promise<string> => {
+    const query = buildQuery({
+      month: params.month,
+      tzOffset: params.tzOffset ?? defaultTzOffset(),
+      format: 'csv',
+    });
+    const baseUrl = getApiUrl();
+    const res = await fetch(`${baseUrl}/api/export${query}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const parsed = JSON.parse(text) as { error?: string };
+        if (parsed.error) errMsg = parsed.error;
+      } catch {
+        // non-json error
+      }
+      throw new ApiError(res.status, errMsg);
+    }
+    return text;
+  },
+
+  exportMonthlyJson: (
+    token: string,
+    params: { month: string; tzOffset?: number }
+  ): Promise<MonthlyExportJson> => {
+    const query = buildQuery({
+      month: params.month,
+      tzOffset: params.tzOffset ?? defaultTzOffset(),
+      format: 'json',
+    });
+    return request<MonthlyExportJson>(`/api/export${query}`, { token });
   },
 };

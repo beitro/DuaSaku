@@ -446,6 +446,10 @@ export function getTier2Tests() {
         await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/categories*' }] });
         let intercepted = false;
         const off = cdp.on('Fetch.requestPaused', async (params) => {
+          if (params.request?.method === 'OPTIONS') {
+            await cdp.send('Fetch.continueRequest', { requestId: params.requestId }).catch(() => undefined);
+            return;
+          }
           if (!intercepted && params.request?.url?.includes('/api/categories')) {
             intercepted = true;
             await cdp.send('Fetch.fulfillRequest', {
@@ -458,6 +462,8 @@ export function getTier2Tests() {
               body: Buffer.from('[]').toString('base64'),
             });
             await cdp.send('Fetch.disable').catch(() => undefined);
+          } else {
+            await cdp.send('Fetch.continueRequest', { requestId: params.requestId }).catch(() => undefined);
           }
         });
 
@@ -1125,8 +1131,11 @@ export function getTier2Tests() {
         const fakeId = '00000000-0000-4000-8000-000000000001';
         const routes = [
           ['GET', '/api/couple'],
+          ['PATCH', '/api/couple'],
           ['GET', '/api/categories'],
           ['POST', '/api/categories'],
+          ['PATCH', `/api/categories/${fakeId}`],
+          ['DELETE', `/api/categories/${fakeId}`],
           ['GET', '/api/transactions'],
           ['POST', '/api/transactions'],
           ['PATCH', `/api/transactions/${fakeId}`],
@@ -1135,6 +1144,8 @@ export function getTier2Tests() {
           ['POST', '/api/accounts'],
           ['PATCH', `/api/accounts/${fakeId}`],
           ['DELETE', `/api/accounts/${fakeId}`],
+          ['GET', '/api/accounts/transfers'],
+          ['POST', '/api/accounts/transfer'],
           ['GET', '/api/budgets'],
           ['POST', '/api/budgets'],
           ['PUT', '/api/budgets'],
@@ -1142,8 +1153,11 @@ export function getTier2Tests() {
           ['DELETE', `/api/budgets/${fakeId}`],
           ['GET', '/api/notes'],
           ['POST', '/api/notes'],
+          ['PATCH', `/api/notes/${fakeId}`],
+          ['DELETE', `/api/notes/${fakeId}`],
           ['GET', '/api/summary'],
           ['GET', '/api/analytics'],
+          ['GET', '/api/export'],
         ];
         for (const [method, p] of routes) {
           assertStatus(await apiRequest(ctx.apiUrl, p, { method }), 401, `No auth ${method} ${p}`);

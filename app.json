@@ -15,7 +15,7 @@
       }
     },
     "extra": {
-      "apiUrl": "http://192.168.1.14:4100"
+      "apiUrl": "https://duasaku-api.vercel.app"
     }
   }
 }

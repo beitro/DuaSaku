@@ -408,7 +408,9 @@ export class CdpClient {
 
     const handlers = this.listeners.get(method);
     if (handlers) {
-      for (const h of handlers) h(params);
+      for (const h of handlers) {
+        Promise.resolve(h(params)).catch(() => undefined);
+      }
     }
   }
 
@@ -416,6 +418,9 @@ export class CdpClient {
     for (const handler of this.fetchInterceptors) {
       const handled = await handler(params, this);
       if (handled) return;
+    }
+    if ((this.listeners.get('Fetch.requestPaused')?.size || 0) > 0) {
+      return;
     }
     await this.send('Fetch.continueRequest', { requestId: params.requestId }).catch(() => undefined);
   }
@@ -473,7 +478,11 @@ export class CdpClient {
     await this.send('Fetch.enable', { patterns: [{ urlPattern: `*${urlSubstr}*` }] });
     let consumed = false;
     const interceptor = async (params) => {
-      if (!consumed && params.request?.url?.includes(urlSubstr)) {
+      if (
+        !consumed &&
+        params.request?.method !== 'OPTIONS' &&
+        params.request?.url?.includes(urlSubstr)
+      ) {
         consumed = true;
         const body = Buffer.from(JSON.stringify(bodyObj)).toString('base64');
         await this.send('Fetch.fulfillRequest', {
@@ -510,6 +519,9 @@ export class CdpClient {
   }
 
   async reload({ waitMs = 10000 } = {}) {
+    await this.evalFn(() => {
+      window.__duasakuPreReload = true;
+    }).catch(() => undefined);
     await this.send('Page.reload', { ignoreCache: true });
     await this.waitForDomReady(waitMs);
   }
@@ -518,6 +530,7 @@ export class CdpClient {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const ready = await this.evalFn(() => {
+        if (window.__duasakuPreReload) return false;
         const txt = document.body?.innerText?.trim() || '';
         return document.readyState === 'complete' && txt.length > 0;
       }).catch(() => false);
@@ -829,8 +842,11 @@ export class CdpClient {
 
   async clearStorage() {
     await this.evalFn(() => {
-      localStorage.clear();
-      sessionStorage.clear();
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+        Storage.prototype.setItem = () => {};
+      } catch {}
     });
   }
 

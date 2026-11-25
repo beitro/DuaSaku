@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { startServer, stopServer, cleanupCouple } from './index.mjs';
 
 const server = await startServer(0);
@@ -717,19 +721,491 @@ try {
   assert.equal(finalCheck.totals.totalIncome, 15900000);
   assert.equal(finalCheck.totals.totalExpense, 1250000);
 
+  // ==========================================================================
+  // Suite 8: M4 Continuation — Notes CRUD, Categories Edit/409, Transfers,
+  //          Couple Profile Edit & Monthly Export (CSV/JSON)
+  // ==========================================================================
+  // 8.1 Notes PATCH / DELETE + validation + cross-couple 404
+  const patchedNote = await req(`/api/notes/${createdNote.id}`, {
+    token: partnerA.token,
+    method: 'PATCH',
+    body: { title: 'Checklist Vendor Final', content: 'Semua vendor lunas', isPinned: false, categoryId: null },
+  });
+  assert.equal(patchedNote.title, 'Checklist Vendor Final');
+  assert.equal(patchedNote.content, 'Semua vendor lunas');
+  assert.equal(patchedNote.isPinned, false);
+  assert.equal(patchedNote.categoryId, null);
+
+  assert.equal((await reqStatus('/api/notes/bad-uuid', { token: partnerA.token, method: 'PATCH', body: { title: 'Valid' } })).status, 400);
+  assert.equal((await reqStatus(`/api/notes/${createdNote.id}`, { token: partnerA.token, method: 'PATCH', body: { title: 'A' } })).status, 400);
+  assert.equal((await reqStatus(`/api/notes/${createdNote.id}`, { token: partnerC.token, method: 'PATCH', body: { title: 'Hack' } })).status, 404);
+  assert.equal((await reqStatus(`/api/notes/${createdNote.id}`, { token: partnerC.token, method: 'DELETE' })).status, 404);
+
+  const noteToDelete = await req('/api/notes', {
+    token: partnerA.token,
+    method: 'POST',
+    body: { title: 'Catatan Sementara', content: 'Hapus nanti', isPinned: true },
+  });
+  const delNoteRes = await req(`/api/notes/${noteToDelete.id}`, { token: partnerB.token, method: 'DELETE' });
+  assert.equal(delNoteRes.ok, true);
+  assert.equal(delNoteRes.id, noteToDelete.id);
+  assert.equal((await reqStatus(`/api/notes/${noteToDelete.id}`, { token: partnerA.token, method: 'DELETE' })).status, 404);
+
+  // 8.2 Categories PATCH / DELETE + 409 guard for tx, budget, and note references
+  const patchedCustomCat = await req(`/api/categories/${customCat.id}`, {
+    token: partnerA.token,
+    method: 'PATCH',
+    body: { name: 'Cicilan Rumah Baru', icon: '🏘️', targetAmount: 300000000 },
+  });
+  assert.equal(patchedCustomCat.name, 'Cicilan Rumah Baru');
+  assert.equal(patchedCustomCat.icon, '🏘️');
+  assert.equal(patchedCustomCat.targetAmount, 300000000);
+  assert.equal((await reqStatus('/api/categories/bad-uuid', { token: partnerA.token, method: 'PATCH', body: { name: 'Valid' } })).status, 400);
+  assert.equal((await reqStatus(`/api/categories/${customCat.id}`, { token: partnerA.token, method: 'PATCH', body: { targetAmount: -1 } })).status, 400);
+  assert.equal((await reqStatus(`/api/categories/${customCat.id}`, { token: partnerA.token, method: 'PATCH', body: { targetAmount: '   ' } })).status, 400);
+  assert.equal((await reqStatus(`/api/categories/${customCat.id}`, { token: partnerA.token, method: 'PATCH', body: { targetAmount: true } })).status, 400);
+  assert.equal((await reqStatus(`/api/categories/${customCat.id}`, { token: partnerA.token, method: 'PATCH', body: { targetAmount: false } })).status, 400);
+  assert.equal((await reqStatus(`/api/categories/${customCat.id}`, { token: partnerA.token, method: 'PATCH', body: { targetAmount: [] } })).status, 400);
+  assert.equal((await reqStatus(`/api/categories/${customCat.id}`, { token: partnerC.token, method: 'PATCH', body: { name: 'Hijack' } })).status, 404);
+
+  // customCat is referenced by tempTx (Suite 4) -> 409
+  assert.equal((await reqStatus(`/api/categories/${customCat.id}`, { token: partnerA.token, method: 'DELETE' })).status, 409);
+
+  // Create fresh category -> test 409 when referenced by budget, then note, then delete cleanly
+  const refCat = await req('/api/categories', {
+    token: partnerA.token,
+    method: 'POST',
+    body: { name: 'Pos Uji Guard', icon: '🧪', targetAmount: 1000000 },
+  });
+  const refBudget = (
+    await req('/api/budgets', {
+      token: partnerA.token,
+      method: 'POST',
+      body: { categoryId: refCat.id, month: '2026-11', limitAmount: 500000 },
+    })
+  ).budget;
+  assert.equal((await reqStatus(`/api/categories/${refCat.id}`, { token: partnerA.token, method: 'DELETE' })).status, 409);
+  await req(`/api/budgets/${refBudget.id}`, { token: partnerA.token, method: 'DELETE' });
+
+  const refNote = await req('/api/notes', {
+    token: partnerA.token,
+    method: 'POST',
+    body: { title: 'Note Guard Pos', categoryId: refCat.id },
+  });
+  assert.equal((await reqStatus(`/api/categories/${refCat.id}`, { token: partnerA.token, method: 'DELETE' })).status, 409);
+  await req(`/api/notes/${refNote.id}`, { token: partnerA.token, method: 'DELETE' });
+
+  assert.equal((await reqStatus(`/api/categories/${refCat.id}`, { token: partnerC.token, method: 'DELETE' })).status, 404);
+  const delRefCat = await req(`/api/categories/${refCat.id}`, { token: partnerA.token, method: 'DELETE' });
+  assert.equal(delRefCat.ok, true);
+  assert.equal(delRefCat.id, refCat.id);
+  assert.equal((await reqStatus(`/api/categories/${refCat.id}`, { token: partnerA.token, method: 'DELETE' })).status, 404);
+
+  // 8.3 Atomic Wallet-to-Wallet Transfer + non-inflation + concurrent bidirectional + 400/404
+  // Currently: cashAcc = 1,500,000 (personal), bankAcc = 2,500,000 (personal), sharedAcc = 4,500,000 (shared), total = 8,500,000
+  const trRes = await req('/api/accounts/transfer', {
+    token: partnerA.token,
+    method: 'POST',
+    body: {
+      fromAccountId: cashAcc.id,
+      toAccountId: sharedAcc.id,
+      amount: 500000,
+      note: 'Setor ke tabungan bersama',
+      occurredAt: '2026-11-20T09:00:00.000Z',
+    },
+  });
+  assert.equal(trRes.fromAccount.balance, 1000000);
+  assert.equal(trRes.toAccount.balance, 5000000);
+  assert.equal(trRes.totals.totalBalance, 8500000);
+  assert.equal(trRes.totals.sharedBalance, 5000000);
+  assert.equal(trRes.totals.personalBalance, 3500000);
+
+  // Concurrent bidirectional transfers conserve exact sum
+  await Promise.all([
+    req('/api/accounts/transfer', {
+      token: partnerA.token,
+      method: 'POST',
+      body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: 200000, occurredAt: '2026-11-20T10:00:00.000Z' },
+    }),
+    req('/api/accounts/transfer', {
+      token: partnerB.token,
+      method: 'POST',
+      body: { fromAccountId: bankAcc.id, toAccountId: cashAcc.id, amount: 100000, occurredAt: '2026-11-20T10:05:00.000Z' },
+    }),
+  ]);
+  const accAfterTransfers = await req('/api/accounts', { token: partnerA.token });
+  assert.equal(accAfterTransfers.accounts.find((a) => a.id === cashAcc.id).balance, 900000);
+  assert.equal(accAfterTransfers.accounts.find((a) => a.id === bankAcc.id).balance, 2600000);
+  assert.equal(accAfterTransfers.totals.totalBalance, 8500000);
+
+  const transferList = await req('/api/accounts/transfers?month=2026-11&tzOffset=420', { token: partnerA.token });
+  assert.equal(transferList.transfers.length, 3);
+
+  // Verify summary, analytics, and budgets totals remain completely uninflated
+  const sumAfterTransfer = await req('/api/summary?month=2026-11&tzOffset=420', { token: partnerA.token });
+  assert.equal(sumAfterTransfer.totalIncome, 15900000);
+  assert.equal(sumAfterTransfer.totalExpense, 1250000);
+  const anaAfterTransfer = await req('/api/analytics?month=2026-11&tzOffset=420', { token: partnerA.token });
+  assert.equal(anaAfterTransfer.totals.totalIncome, 15900000);
+  assert.equal(anaAfterTransfer.totals.totalExpense, 1250000);
+  assert.equal(anaAfterTransfer.totals.transactionCount, 6);
+
+  // Transfer validation 400 & cross-couple 404
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: cashAcc.id, amount: 10000 } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: 0 } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: -5000 } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: 999999999 } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: 1000, date: 'invalid' } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: true } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: false } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: [] } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: '   ' } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: 1000, occurredAt: '' } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: 1000, occurredAt: null } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: 1000, date: '' } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerA.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: 1000, date: null } })).status, 400);
+  assert.equal((await reqStatus('/api/accounts/transfer', { token: partnerC.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: bankAcc.id, amount: 10000 } })).status, 404);
+
+  // 8.4 Couple Profile PATCH + Dynamic Note Author Hydration
+  assert.equal((await reqStatus('/api/couple', { method: 'PATCH', body: { coupleName: 'No Auth' } })).status, 401);
+  assert.equal((await reqStatus('/api/couple', { token: partnerA.token, method: 'PATCH', body: {} })).status, 400);
+  assert.equal((await reqStatus('/api/couple', { token: partnerA.token, method: 'PATCH', body: { coupleName: 'X' } })).status, 400);
+  assert.equal((await reqStatus('/api/couple', { token: partnerA.token, method: 'PATCH', body: { partnerName: 'Y' } })).status, 400);
+
+  const patchedCoupleA = await req('/api/couple', {
+    token: partnerA.token,
+    method: 'PATCH',
+    body: { coupleName: 'Dompet Impian Berdua', partnerName: 'Raka Pratama' },
+  });
+  assert.equal(patchedCoupleA.couple.coupleName, 'Dompet Impian Berdua');
+  assert.equal(patchedCoupleA.partner.name, 'Raka Pratama');
+
+  // Partner B renames self without mutating Partner A
+  const patchedCoupleB = await req('/api/couple', {
+    token: partnerB.token,
+    method: 'PATCH',
+    body: { partnerName: 'Nadia Putri' },
+  });
+  assert.equal(patchedCoupleB.partner.name, 'Nadia Putri');
+  const coupleAfterRename = await req('/api/couple', { token: partnerA.token });
+  assert.equal(coupleAfterRename.partners.find((p) => p.id === partnerA.partner.id).name, 'Raka Pratama');
+  assert.equal(coupleAfterRename.partners.find((p) => p.id === partnerB.partner.id).name, 'Nadia Putri');
+
+  // Dynamic note authorName hydration reflects Nadia's rename
+  const notesAfterRename = await req('/api/notes', { token: partnerA.token });
+  assert.equal(notesAfterRename.find((n) => n.id === createdNote.id).authorName, 'Nadia Putri');
+
+  // 8.5 Monthly Export (JSON & CSV)
+  const exportJson = await req('/api/export?month=2026-11&tzOffset=420&format=json', { token: partnerA.token });
+  assert.equal(exportJson.month, '2026-11');
+  assert.equal(exportJson.couple.coupleName, 'Dompet Impian Berdua');
+  assert.equal(exportJson.summary.totalIncome, 15900000);
+  assert.equal(exportJson.summary.totalExpense, 1250000);
+  assert.equal(exportJson.transactions.length, 6);
+  assert.equal(exportJson.transfers.length, 3);
+
+  const exportCsv = await reqStatus('/api/export?month=2026-11&tzOffset=420&format=csv', { token: partnerA.token });
+  assert.equal(exportCsv.status, 200);
+  assert.ok(String(exportCsv.data).startsWith('Tanggal,Tipe,Kategori,Dompet,Pasangan,Nominal,Catatan'));
+  assert.ok(String(exportCsv.data).includes('Raka Pratama'));
+  assert.equal((await reqStatus('/api/export?month=2026-11&format=xml', { token: partnerA.token })).status, 400);
+
+  // 8.6 CSV Formula Injection (CWE-1236) neutralization & RFC-4180 parity (server & src/utils/export.ts)
+  const csvSafetyCouple = await req('/api/couples/create', {
+    method: 'POST',
+    body: { coupleName: 'CSV Safety Couple', partnerName: 'Sari' },
+  });
+  createdCoupleIds.push(csvSafetyCouple.couple.id);
+  const csvCats = await req('/api/categories', { token: csvSafetyCouple.token });
+  const csvCatId = csvCats[0].id;
+  const csvTestNotes = [
+    { amount: 1000, note: "=CMD|'/C calc'!A0" },
+    { amount: 2000, note: '+SUM(1,2)' },
+    { amount: 3000, note: '-1+1' },
+    { amount: 4000, note: '@SUM(1,1)' },
+    { amount: 5000, note: '  =1+1' },
+    { amount: 6000, note: '\t=1+1' },
+    { amount: 7000, note: 'Makan, "Spesial"\nBaris 2\r\nBaris 3' },
+    { amount: 8000, note: '\n=1+1' },
+  ];
+  const formulaCat = await req('/api/categories', {
+    token: csvSafetyCouple.token,
+    method: 'POST',
+    body: { name: '=HYPERLINK("http://evil.example","Klik")', icon: '⚠️', targetAmount: 0 },
+  });
+  await req('/api/transactions', {
+    token: csvSafetyCouple.token,
+    method: 'POST',
+    body: {
+      categoryId: formulaCat.id,
+      type: 'expense',
+      amount: 9000,
+      note: 'Kategori formula',
+      occurredAt: '2026-11-18T10:00:00.000Z',
+    },
+  });
+  for (let i = 0; i < csvTestNotes.length; i += 1) {
+    await req('/api/transactions', {
+      token: csvSafetyCouple.token,
+      method: 'POST',
+      body: {
+        categoryId: csvCatId,
+        type: 'expense',
+        amount: csvTestNotes[i].amount,
+        note: csvTestNotes[i].note,
+        occurredAt: `2026-11-${String(10 + i).padStart(2, '0')}T10:00:00.000Z`,
+      },
+    });
+  }
+  const safeCsvRes = await reqStatus('/api/export?month=2026-11&tzOffset=420&format=csv', {
+    token: csvSafetyCouple.token,
+  });
+  assert.equal(safeCsvRes.status, 200);
+  const safeCsvText = String(safeCsvRes.data);
+  assert.ok(safeCsvText.includes(",1000,'=CMD|'/C calc'!A0"));
+  assert.ok(safeCsvText.includes(',2000,"\'+SUM(1,2)"'));
+  assert.ok(safeCsvText.includes(",3000,'-1+1"));
+  assert.ok(safeCsvText.includes(',4000,"\'@SUM(1,1)"'));
+  assert.ok(safeCsvText.includes(",5000,'  =1+1"));
+  assert.ok(safeCsvText.includes(",6000,'\t=1+1"));
+  assert.ok(safeCsvText.includes(',7000,"Makan, ""Spesial""\nBaris 2\r\nBaris 3"'));
+  assert.ok(safeCsvText.includes(',8000,"\'\n=1+1"'));
+  assert.ok(safeCsvText.includes('"\'=HYPERLINK(""http://evil.example"",""Klik"")"'));
+
+  const exportTsPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/utils/export.ts');
+  const exportTsCompiled = ts.transpileModule(readFileSync(exportTsPath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const exportMod = { exports: {} };
+  const stubRequire = (id) => {
+    if (id === 'react-native') return { Platform: { OS: 'web' }, Share: {} };
+    if (id === 'expo-file-system') return { File: class {}, Paths: {} };
+    throw new Error(`Unexpected import in src/utils/export.ts: ${id}`);
+  };
+  new Function('exports', 'require', 'module', exportTsCompiled)(exportMod.exports, stubRequire, exportMod);
+  const clientEscapeCsvCell = exportMod.exports.escapeCsvCell;
+  assert.equal(clientEscapeCsvCell("=CMD|'/C calc'!A0"), "'=CMD|'/C calc'!A0");
+  assert.equal(clientEscapeCsvCell('+SUM(1,2)'), '"\'+SUM(1,2)"');
+  assert.equal(clientEscapeCsvCell('-1+1'), "'-1+1");
+  assert.equal(clientEscapeCsvCell('@SUM(1,1)'), '"\'@SUM(1,1)"');
+  assert.equal(clientEscapeCsvCell('  =1+1'), "'  =1+1");
+  assert.equal(clientEscapeCsvCell('\t=1+1'), "'\t=1+1");
+  assert.equal(clientEscapeCsvCell('\rfoo'), '"\'\rfoo"');
+  assert.equal(clientEscapeCsvCell('\n=1+1'), '"\'\n=1+1"');
+  assert.equal(clientEscapeCsvCell('\nfoo'), '"\'\nfoo"');
+  assert.equal(clientEscapeCsvCell('Makan, "Spesial"\nBaris 2\r\nBaris 3'), '"Makan, ""Spesial""\nBaris 2\r\nBaris 3"');
+  assert.equal(clientEscapeCsvCell(12345), '12345');
+  assert.equal(clientEscapeCsvCell(null), '');
+  assert.equal(clientEscapeCsvCell(undefined), '');
+
+  // 8.7 Tier 5 White-Box Adversarial Checks (Strict Numerics, Boundary Transfers, Unlinking, Couple Alias)
+  const advCouple = await req('/api/couples/create', {
+    method: 'POST',
+    body: { coupleName: 'Adversarial Couple', partnerName: 'Dina' },
+  });
+  createdCoupleIds.push(advCouple.couple.id);
+  const advCats = await req('/api/categories', { token: advCouple.token });
+  const advCatDefault = advCats[0];
+  const advAccA = (
+    await req('/api/accounts', {
+      token: advCouple.token,
+      method: 'POST',
+      body: { name: 'Dompet Adv A', accountType: 'cash', isShared: false, initialBalance: 50000 },
+    })
+  ).account;
+  const advAccB = (
+    await req('/api/accounts', {
+      token: advCouple.token,
+      method: 'POST',
+      body: { name: 'Bank Adv B', accountType: 'bank', isShared: true, initialBalance: 100000 },
+    })
+  ).account;
+  const advTx = (
+    await req('/api/transactions', {
+      token: advCouple.token,
+      method: 'POST',
+      body: { categoryId: advCatDefault.id, type: 'expense', amount: 10000, occurredAt: '2026-11-12T10:00:00.000Z' },
+    })
+  ).transaction;
+  const advBudget = (
+    await req('/api/budgets', {
+      token: advCouple.token,
+      method: 'POST',
+      body: { categoryId: advCatDefault.id, month: '2026-11', limitAmount: 500000 },
+    })
+  ).budget;
+
+  // Strict numeric coercion rejections across all numeric endpoints
+  const badNums = [true, false, null, [], {}, '', '   '];
+  for (const badVal of badNums) {
+    assert.equal(
+      (await reqStatus('/api/categories', { token: advCouple.token, method: 'POST', body: { name: 'BadCat', targetAmount: badVal } })).status,
+      400,
+      `POST /api/categories should reject targetAmount=${JSON.stringify(badVal)}`
+    );
+    assert.equal(
+      (await reqStatus(`/api/categories/${advCatDefault.id}`, { token: advCouple.token, method: 'PATCH', body: { targetAmount: badVal } })).status,
+      400,
+      `PATCH /api/categories/:id should reject targetAmount=${JSON.stringify(badVal)}`
+    );
+    assert.equal(
+      (await reqStatus('/api/accounts', { token: advCouple.token, method: 'POST', body: { name: 'BadAcc', accountType: 'cash', initialBalance: badVal } })).status,
+      400,
+      `POST /api/accounts should reject initialBalance=${JSON.stringify(badVal)}`
+    );
+    assert.equal(
+      (await reqStatus(`/api/accounts/${advAccA.id}`, { token: advCouple.token, method: 'PATCH', body: { initialBalance: badVal } })).status,
+      400,
+      `PATCH /api/accounts/:id should reject initialBalance=${JSON.stringify(badVal)}`
+    );
+    assert.equal(
+      (await reqStatus('/api/transactions', { token: advCouple.token, method: 'POST', body: { categoryId: advCatDefault.id, type: 'expense', amount: badVal } })).status,
+      400,
+      `POST /api/transactions should reject amount=${JSON.stringify(badVal)}`
+    );
+    assert.equal(
+      (await reqStatus(`/api/transactions/${advTx.id}`, { token: advCouple.token, method: 'PATCH', body: { amount: badVal } })).status,
+      400,
+      `PATCH /api/transactions/:id should reject amount=${JSON.stringify(badVal)}`
+    );
+    assert.equal(
+      (await reqStatus('/api/budgets', { token: advCouple.token, method: 'POST', body: { categoryId: advCatDefault.id, month: '2026-11', limitAmount: badVal } })).status,
+      400,
+      `POST /api/budgets should reject limitAmount=${JSON.stringify(badVal)}`
+    );
+    assert.equal(
+      (await reqStatus('/api/budgets', { token: advCouple.token, method: 'PUT', body: { categoryId: advCatDefault.id, month: '2026-11', limitAmount: badVal } })).status,
+      400,
+      `PUT /api/budgets should reject limitAmount=${JSON.stringify(badVal)}`
+    );
+    assert.equal(
+      (await reqStatus(`/api/budgets/${advBudget.id}`, { token: advCouple.token, method: 'PATCH', body: { limitAmount: badVal } })).status,
+      400,
+      `PATCH /api/budgets/:id should reject limitAmount=${JSON.stringify(badVal)}`
+    );
+    assert.equal(
+      (await reqStatus('/api/accounts/transfer', { token: advCouple.token, method: 'POST', body: { fromAccountId: advAccA.id, toAccountId: advAccB.id, amount: badVal } })).status,
+      400,
+      `POST /api/accounts/transfer should reject amount=${JSON.stringify(badVal)}`
+    );
+  }
+  // Omitted optional numeric fields still default to 0 cleanly
+  const catOmittedTarget = await req('/api/categories', {
+    token: advCouple.token,
+    method: 'POST',
+    body: { name: 'Tanpa Target' },
+  });
+  assert.equal(catOmittedTarget.targetAmount, 0);
+  const accOmittedBalance = (
+    await req('/api/accounts', {
+      token: advCouple.token,
+      method: 'POST',
+      body: { name: 'Saldo Kosong', accountType: 'cash' },
+    })
+  ).account;
+  assert.equal(accOmittedBalance.initialBalance, 0);
+
+  // Sub-cent rounding (0.004 -> 0 -> 400), over-balance by 0.01 (400), cross-couple partial ownership (404)
+  assert.equal(
+    (await reqStatus('/api/accounts/transfer', { token: advCouple.token, method: 'POST', body: { fromAccountId: advAccA.id, toAccountId: advAccB.id, amount: 0.004 } })).status,
+    400
+  );
+  assert.equal(
+    (await reqStatus('/api/accounts/transfer', { token: advCouple.token, method: 'POST', body: { fromAccountId: advAccA.id, toAccountId: advAccB.id, amount: 50000.01 } })).status,
+    400
+  );
+  assert.equal(
+    (await reqStatus('/api/accounts/transfer', { token: advCouple.token, method: 'POST', body: { fromAccountId: advAccA.id, toAccountId: cashAcc.id, amount: 1000 } })).status,
+    404
+  );
+  assert.equal(
+    (await reqStatus('/api/accounts/transfer', { token: advCouple.token, method: 'POST', body: { fromAccountId: cashAcc.id, toAccountId: advAccB.id, amount: 1000 } })).status,
+    404
+  );
+
+  // Exact full-balance transfer (50000 -> fromAccount.balance === 0) on WIB month boundary
+  const exactTransfer = await req('/api/accounts/transfer', {
+    token: advCouple.token,
+    method: 'POST',
+    body: {
+      fromAccountId: advAccA.id,
+      toAccountId: advAccB.id,
+      amount: 50000,
+      note: 'Pindah semua saldo',
+      occurredAt: '2026-10-31T18:00:00.000Z',
+    },
+  });
+  assert.equal(exactTransfer.fromAccount.balance, 0);
+  assert.equal(exactTransfer.toAccount.balance, 150000);
+
+  const novTransfersWib = await req('/api/accounts/transfers?month=2026-11&tzOffset=420', { token: advCouple.token });
+  assert.equal(novTransfersWib.transfers.length, 1);
+  const octTransfersWib = await req('/api/accounts/transfers?month=2026-10&tzOffset=420', { token: advCouple.token });
+  assert.equal(octTransfersWib.transfers.length, 0);
+  const octTransfersUtc = await req('/api/accounts/transfers?month=2026-10&tzOffset=0', { token: advCouple.token });
+  assert.equal(octTransfersUtc.transfers.length, 1);
+
+  // Delete source account -> transfer history preserved with fromAccountId=null & export JSON 200
+  await req(`/api/accounts/${advAccA.id}`, { token: advCouple.token, method: 'DELETE' });
+  const advExportJson = await req('/api/export?month=2026-11&tzOffset=420&format=json', { token: advCouple.token });
+  assert.equal(advExportJson.transfers.length, 1);
+  assert.equal(advExportJson.transfers[0].fromAccountId, null);
+  assert.equal(advExportJson.transfers[0].toAccountId, advAccB.id);
+
+  // PATCH /api/notes/:id cross-couple categoryId (404) + note unlinking unblocking DELETE /api/categories/:id
+  const unlinkCat = await req('/api/categories', {
+    token: advCouple.token,
+    method: 'POST',
+    body: { name: 'Kategori Unlink' },
+  });
+  const linkedNote = await req('/api/notes', {
+    token: advCouple.token,
+    method: 'POST',
+    body: { title: 'Note Terkait', categoryId: unlinkCat.id },
+  });
+  assert.equal(
+    (await reqStatus(`/api/notes/${linkedNote.id}`, { token: advCouple.token, method: 'PATCH', body: { categoryId: weddingCat.id } })).status,
+    404
+  );
+  assert.equal((await reqStatus(`/api/categories/${unlinkCat.id}`, { token: advCouple.token, method: 'DELETE' })).status, 409);
+  const unlinkedNote = await req(`/api/notes/${linkedNote.id}`, {
+    token: advCouple.token,
+    method: 'PATCH',
+    body: { categoryId: null },
+  });
+  assert.equal(unlinkedNote.categoryId, null);
+  assert.equal((await req(`/api/categories/${unlinkCat.id}`, { token: advCouple.token, method: 'DELETE' })).ok, true);
+
+  // PATCH /api/couple name alias & partial updates
+  const aliasRes = await req('/api/couple', {
+    token: advCouple.token,
+    method: 'PATCH',
+    body: { name: 'Dina Larasati' },
+  });
+  assert.equal(aliasRes.partner.name, 'Dina Larasati');
+  assert.equal(aliasRes.couple.coupleName, 'Adversarial Couple');
+  const coupleOnlyRes = await req('/api/couple', {
+    token: advCouple.token,
+    method: 'PATCH',
+    body: { coupleName: 'Dompet Dina' },
+  });
+  assert.equal(coupleOnlyRes.couple.coupleName, 'Dompet Dina');
+  assert.equal(coupleOnlyRes.partner.name, 'Dina Larasati');
+
   console.log(
     JSON.stringify(
       {
         ok: true,
         storage: health.storage,
-        suitesPassed: 7,
+        suitesPassed: 8,
         novSummary: {
           totalIncome: novSummary.totalIncome,
           totalExpense: novSummary.totalExpense,
           netBalance: novSummary.netBalance,
         },
         accountsOverview: novAnalytics.accountsOverview,
-        notesCount: notes.length,
+        notesCount: notesAfterRename.length,
+        transfersCount: transferList.transfers.length,
       },
       null,
       2

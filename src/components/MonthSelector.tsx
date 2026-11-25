@@ -34,7 +34,7 @@ export function MonthSelector({
       </TouchableOpacity>
 
       <View style={styles.centerBlock}>
-        <Text style={styles.kicker}>SELAMA SEBULAN</Text>
+        <Text style={styles.kicker}>Selama Sebulan</Text>
         <View style={styles.labelRow}>
           <Text style={styles.monthText} testID={`${testIDPrefix}-label`}>
             {formatMonthLabel(month)}

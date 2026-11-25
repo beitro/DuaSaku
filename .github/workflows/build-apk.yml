@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       api_url:
-        description: 'Backend API URL untuk APK (contoh: http://192.168.1.14:4100 atau URL Vercel)'
+        description: 'Backend API URL untuk APK (default: https://duasaku-api.vercel.app)'
         required: false
-        default: 'http://192.168.1.14:4100'
+        default: 'https://duasaku-api.vercel.app'
 
 jobs:
   build-apk:
@@ -42,12 +42,12 @@ jobs:
 
       - name: Generate Android native project (Expo Prebuild)
         env:
-          EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'http://192.168.1.14:4100' }}
+          EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://duasaku-api.vercel.app' }}
         run: npx expo prebuild --platform android --non-interactive
 
       - name: Build Standalone Release APK
         env:
-          EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'http://192.168.1.14:4100' }}
+          EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://duasaku-api.vercel.app' }}
         run: |
           cd android
           chmod +x gradlew

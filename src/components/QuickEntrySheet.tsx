@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -14,7 +14,13 @@ import {
 import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, QUICK_AMOUNT_PRESETS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import type { TransactionType } from '../types';
-import { formatRp, isValidDateInput, parseIdrInput, toLocalDateInput } from '../utils/format';
+import {
+  formatRp,
+  isValidDateInput,
+  parseIdrInput,
+  shiftDateInput,
+  toLocalDateInput,
+} from '../utils/format';
 
 export function QuickEntrySheet(): React.JSX.Element | null {
   const {
@@ -38,10 +44,26 @@ export function QuickEntrySheet(): React.JSX.Element | null {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [dateInput, setDateInput] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const prevOpenRef = useRef(false);
+  const prevQuickEntryRef = useRef(quickEntry);
 
   useEffect(() => {
+    const justOpened = !prevOpenRef.current && quickEntryOpen;
+    const entryChanged = prevQuickEntryRef.current !== quickEntry;
+    prevOpenRef.current = quickEntryOpen;
+    prevQuickEntryRef.current = quickEntry;
+
     if (!quickEntryOpen) return;
+    if (!justOpened && !entryChanged) {
+      if (!categoryId && categories[0]?.id) {
+        setCategoryId(categories[0].id);
+      }
+      return;
+    }
+
+    setFormError(null);
     if (quickEntry.mode === 'edit' && quickEntry.editingTx) {
       const tx = quickEntry.editingTx;
       setType(tx.type);
@@ -59,24 +81,31 @@ export function QuickEntrySheet(): React.JSX.Element | null {
       const today = toLocalDateInput(new Date());
       setDateInput(today.startsWith(selectedMonth) ? today : `${selectedMonth}-01`);
     }
-  }, [quickEntryOpen, quickEntry, categories, accounts, selectedMonth]);
+  }, [quickEntryOpen, quickEntry, categories, accounts, selectedMonth, categoryId]);
 
   if (!quickEntryOpen) return null;
 
   const parsedAmount = parseIdrInput(amountInput);
 
   const handleSave = async () => {
+    setFormError(null);
     if (!categoryId) {
-      showError('Pilih kategori terlebih dahulu.');
+      const msg = 'Pilih kategori terlebih dahulu.';
+      setFormError(msg);
+      showError(msg);
       return;
     }
     if (parsedAmount <= 0) {
-      showError('Masukkan nominal transaksi lebih dari 0.');
+      const msg = 'Masukkan nominal transaksi lebih dari 0.';
+      setFormError(msg);
+      showError(msg);
       return;
     }
     const trimmedDate = dateInput.trim();
     if (!isValidDateInput(trimmedDate)) {
-      showError('Format tanggal harus YYYY-MM-DD (contoh: 2026-11-22).');
+      const msg = 'Format tanggal harus YYYY-MM-DD (contoh: 2026-11-22).';
+      setFormError(msg);
+      showError(msg);
       return;
     }
     const occurredAt = new Date(`${trimmedDate}T12:00:00`).toISOString();
@@ -179,7 +208,7 @@ export function QuickEntrySheet(): React.JSX.Element | null {
               keyboardType="numeric"
               value={amountInput}
               onChangeText={setAmountInput}
-              placeholder="0"
+              placeholder="Contoh: 500000"
               placeholderTextColor={COLORS.textPlaceholder}
               testID="quick-entry-amount-input"
             />
@@ -255,7 +284,24 @@ export function QuickEntrySheet(): React.JSX.Element | null {
               onChangeText={setDateInput}
               placeholder="2026-11-22"
               placeholderTextColor={COLORS.textPlaceholder}
+              testID="quick-entry-date-input"
             />
+            <View style={styles.dateQuickRow}>
+              <TouchableOpacity
+                style={styles.dateQuickChip}
+                onPress={() => setDateInput(toLocalDateInput(new Date()))}
+                testID="quick-date-today"
+              >
+                <Text style={styles.dateQuickText}>Hari Ini</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.dateQuickChip}
+                onPress={() => setDateInput(shiftDateInput(toLocalDateInput(new Date()), -1))}
+                testID="quick-date-yesterday"
+              >
+                <Text style={styles.dateQuickText}>Kemarin</Text>
+              </TouchableOpacity>
+            </View>
 
             <Text style={styles.label}>Catatan</Text>
             <TextInput
@@ -266,6 +312,12 @@ export function QuickEntrySheet(): React.JSX.Element | null {
               placeholderTextColor={COLORS.textPlaceholder}
               testID="quick-entry-note-input"
             />
+
+            {!!formError && (
+              <View style={styles.inlineErrorBox}>
+                <Text style={styles.inlineErrorText}>{formError}</Text>
+              </View>
+            )}
           </ScrollView>
 
           <View style={styles.footerRow}>
@@ -275,6 +327,14 @@ export function QuickEntrySheet(): React.JSX.Element | null {
               </TouchableOpacity>
             )}
             <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={closeQuickEntry}
+              disabled={submitting}
+              testID="quick-entry-cancel-btn"
+            >
+              <Text style={styles.cancelBtnText}>Batal</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={[styles.saveBtn, type === 'income' ? styles.saveIncome : styles.saveExpense]}
               onPress={handleSave}
               disabled={submitting}
@@ -283,9 +343,7 @@ export function QuickEntrySheet(): React.JSX.Element | null {
               {submitting ? (
                 <ActivityIndicator color={COLORS.white} />
               ) : (
-                <Text style={styles.saveBtnText}>
-                  {quickEntry.mode === 'edit' ? 'Simpan Perubahan' : 'Simpan Transaksi'}
-                </Text>
+                <Text style={styles.saveBtnText}>Simpan</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -434,10 +492,57 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginBottom: SPACING.md,
   },
+  dateQuickRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginTop: -SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  dateQuickChip: {
+    backgroundColor: COLORS.warmSand,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  dateQuickText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  inlineErrorBox: {
+    backgroundColor: COLORS.terracottaSoft,
+    borderWidth: 1,
+    borderColor: COLORS.terracotta,
+    borderRadius: RADII.sm,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  inlineErrorText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.terracottaDark,
+  },
   footerRow: {
     flexDirection: 'row',
     gap: SPACING.sm,
     marginTop: SPACING.sm,
+  },
+  cancelBtn: {
+    backgroundColor: COLORS.warmSand,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.md,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: 13,
+    justifyContent: 'center',
+  },
+  cancelBtnText: {
+    color: COLORS.textPrimary,
+    fontWeight: '700',
+    fontSize: 13,
   },
   deleteBtn: {
     backgroundColor: COLORS.terracottaSoft,

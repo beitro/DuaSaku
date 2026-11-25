@@ -20,6 +20,7 @@ import {
   SHADOWS,
   SPACING,
 } from '../theme/tokens';
+import type { CategoryGoal } from '../types';
 import { formatMonthLabel, formatRp, parseIdrInput } from '../utils/format';
 
 const EMOJI_PRESETS = ['✨', '🏡', '🎓', '👶', '🚗', '🩺', '🛍️', '🎁'] as const;
@@ -31,11 +32,15 @@ export function CategoriesScreen(): React.JSX.Element {
     selectedMonth,
     loading,
     createCategory,
+    updateCategory,
+    deleteCategory,
+    requestConfirm,
     openNewTransaction,
   } = useDuaSaku();
   const { height } = useWindowDimensions();
 
   const [showModal, setShowModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<CategoryGoal | null>(null);
   const [catName, setCatName] = useState('');
   const [catIcon, setCatIcon] = useState('✨');
   const [catColor, setCatColor] = useState<string>(CATEGORY_COLOR_PRESETS[0]);
@@ -50,7 +55,22 @@ export function CategoriesScreen(): React.JSX.Element {
     return map;
   }, [summary]);
 
-  const openModal = () => {
+  const openCreateModal = () => {
+    setEditingCategory(null);
+    setCatName('');
+    setCatIcon('✨');
+    setCatColor(CATEGORY_COLOR_PRESETS[0]);
+    setCatTarget('');
+    setFormError(null);
+    setShowModal(true);
+  };
+
+  const openEditModal = (cat: CategoryGoal) => {
+    setEditingCategory(cat);
+    setCatName(cat.name);
+    setCatIcon(cat.icon || '✨');
+    setCatColor(cat.color || CATEGORY_COLOR_PRESETS[0]);
+    setCatTarget(cat.targetAmount > 0 ? String(Math.round(cat.targetAmount)) : '');
     setFormError(null);
     setShowModal(true);
   };
@@ -58,6 +78,7 @@ export function CategoriesScreen(): React.JSX.Element {
   const closeModal = () => {
     if (loading) return;
     setShowModal(false);
+    setEditingCategory(null);
     setFormError(null);
   };
 
@@ -70,12 +91,22 @@ export function CategoriesScreen(): React.JSX.Element {
     }
     const parsedTarget = parseIdrInput(catTarget);
     try {
-      await createCategory({
-        name: trimmedName,
-        icon: catIcon.trim() || '✨',
-        color: catColor,
-        targetAmount: parsedTarget,
-      });
+      if (editingCategory) {
+        await updateCategory(editingCategory.id, {
+          name: trimmedName,
+          icon: catIcon.trim() || '✨',
+          color: catColor,
+          targetAmount: parsedTarget,
+        });
+      } else {
+        await createCategory({
+          name: trimmedName,
+          icon: catIcon.trim() || '✨',
+          color: catColor,
+          targetAmount: parsedTarget,
+        });
+      }
+      setEditingCategory(null);
       setCatName('');
       setCatIcon('✨');
       setCatColor(CATEGORY_COLOR_PRESETS[0]);
@@ -84,6 +115,17 @@ export function CategoriesScreen(): React.JSX.Element {
     } catch {
       // Error surfaced via FeedbackBanner
     }
+  };
+
+  const handleDeletePress = (cat: CategoryGoal) => {
+    requestConfirm({
+      title: 'Hapus Pos Keuangan?',
+      message: `Hapus pos "${cat.name}"? Pos yang masih dipakai transaksi, anggaran, atau catatan tidak dapat dihapus.`,
+      confirmLabel: 'Hapus',
+      cancelLabel: 'Batal',
+      destructive: true,
+      onConfirm: () => deleteCategory(cat.id),
+    });
   };
 
   return (
@@ -97,7 +139,7 @@ export function CategoriesScreen(): React.JSX.Element {
         </View>
         <TouchableOpacity
           style={styles.addBtn}
-          onPress={openModal}
+          onPress={openCreateModal}
           accessibilityRole="button"
           testID="categories-add-btn"
         >
@@ -181,6 +223,27 @@ export function CategoriesScreen(): React.JSX.Element {
                   />
                 </View>
               )}
+
+              <View style={styles.cardActionsRow}>
+                <TouchableOpacity
+                  style={styles.actionPill}
+                  onPress={() => openEditModal(cat)}
+                  disabled={loading}
+                  accessibilityRole="button"
+                  testID={`category-edit-${cat.id}`}
+                >
+                  <Text style={styles.actionPillText}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionPill, styles.deletePill]}
+                  onPress={() => handleDeletePress(cat)}
+                  disabled={loading}
+                  accessibilityRole="button"
+                  testID={`category-delete-${cat.id}`}
+                >
+                  <Text style={styles.deletePillText}>Hapus</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           );
         })
@@ -205,7 +268,9 @@ export function CategoriesScreen(): React.JSX.Element {
               keyboardShouldPersistTaps="handled"
             >
               <View style={styles.modalCard}>
-                <Text style={styles.modalTitle}>Tambah Kategori / Pos Baru</Text>
+                <Text style={styles.modalTitle}>
+                  {editingCategory ? 'Edit Pos Keuangan' : 'Tambah Kategori / Pos Baru'}
+                </Text>
 
                 <Text style={styles.label}>Nama Kategori</Text>
                 <TextInput
@@ -298,7 +363,9 @@ export function CategoriesScreen(): React.JSX.Element {
                     {loading ? (
                       <ActivityIndicator color={COLORS.white} size="small" />
                     ) : (
-                      <Text style={styles.saveBtnText}>Tambah Pos</Text>
+                      <Text style={styles.saveBtnText}>
+                        {editingCategory ? 'Simpan Perubahan' : 'Tambah Pos'}
+                      </Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -476,6 +543,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: COLORS.textMuted,
+  },
+  cardActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: SPACING.sm,
+    marginTop: SPACING.sm + 2,
+  },
+  actionPill: {
+    backgroundColor: COLORS.warmSand,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.pill,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 5,
+  },
+  actionPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  deletePill: {
+    backgroundColor: COLORS.terracottaSoft,
+    borderColor: COLORS.terracotta,
+  },
+  deletePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.terracottaDark,
   },
   modalBackdrop: {
     flex: 1,

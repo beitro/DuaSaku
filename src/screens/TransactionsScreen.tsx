@@ -79,7 +79,7 @@ export function TransactionsScreen(): React.JSX.Element {
         style={styles.searchInput}
         value={searchQuery}
         onChangeText={setSearchQuery}
-        placeholder="Cari catatan, kategori, atau dompet..."
+        placeholder="Cari transaksi, kategori, atau dompet..."
         placeholderTextColor={COLORS.textPlaceholder}
       />
 

@@ -11,6 +11,7 @@ import { ApiError, duaSakuApi } from '../api/client';
 import type { FeedbackKind, FeedbackState } from '../components/FeedbackBanner';
 import type {
   AccountTotals,
+  AccountTransfer,
   CategoryGoal,
   CoupleAccount,
   CoupleSpace,
@@ -26,11 +27,18 @@ import type {
   SharedNote,
   TabKey,
   TransactionType,
+  TransferAccountPayload,
+  TransferAccountResponse,
   UpdateAccountPayload,
   UpdateBudgetPayload,
+  UpdateCategoryPayload,
+  UpdateCouplePayload,
+  UpdateCoupleResponse,
+  UpdateNotePayload,
   UpdateTransactionPayload,
   UpsertBudgetPayload,
 } from '../types';
+import { triggerExportDownload } from '../utils/export';
 import { getCurrentMonthKey, getLocalTzOffset, isValidMonthKey } from '../utils/format';
 import {
   clearSession,
@@ -88,6 +96,7 @@ export interface DuaSakuContextValue {
   categories: CategoryGoal[];
   accounts: CoupleAccount[];
   accountTotals: AccountTotals;
+  transfers: AccountTransfer[];
   transactions: CoupleTransaction[];
   budgets: MonthlyBudget[];
   budgetTotals: BudgetTotals;
@@ -120,6 +129,7 @@ export interface DuaSakuContextValue {
   // API Actions
   createCouple: (coupleName: string, partnerName: string) => Promise<void>;
   joinCouple: (inviteCode: string, partnerName: string) => Promise<void>;
+  updateCoupleProfile: (payload: UpdateCouplePayload) => Promise<UpdateCoupleResponse>;
   logout: () => void;
   refreshAll: () => Promise<void>;
   createTransaction: (payload: CreateTransactionPayload) => Promise<CoupleTransaction>;
@@ -128,11 +138,17 @@ export interface DuaSakuContextValue {
   createAccount: (payload: CreateAccountPayload) => Promise<CoupleAccount>;
   updateAccount: (id: string, payload: UpdateAccountPayload) => Promise<CoupleAccount>;
   deleteAccount: (id: string) => Promise<void>;
+  transferAccounts: (payload: TransferAccountPayload) => Promise<TransferAccountResponse>;
   saveBudget: (payload: UpsertBudgetPayload) => Promise<MonthlyBudget>;
   updateBudget: (id: string, payload: UpdateBudgetPayload) => Promise<MonthlyBudget>;
   deleteBudget: (id: string) => Promise<void>;
   createCategory: (payload: CreateCategoryPayload) => Promise<CategoryGoal>;
+  updateCategory: (id: string, payload: UpdateCategoryPayload) => Promise<CategoryGoal>;
+  deleteCategory: (id: string) => Promise<void>;
   createNote: (payload: CreateNotePayload) => Promise<SharedNote>;
+  updateNote: (id: string, payload: UpdateNotePayload) => Promise<SharedNote>;
+  deleteNote: (id: string) => Promise<void>;
+  exportMonthlyReport: (format: 'csv' | 'json') => Promise<void>;
 }
 
 const EMPTY_ACCOUNT_TOTALS: AccountTotals = {
@@ -185,7 +201,7 @@ export function DuaSakuProvider({
   const initialMonth = useMemo(() => getInitialMonth(), []);
 
   const [token, setToken] = useState<string | null>(initialSession?.token ?? null);
-  const [couple, setCouple] = useState<CoupleSpace | null>(null);
+  const [couple, setCouple] = useState<CoupleSpace | null>(initialSession?.couple ?? null);
   const [me, setMe] = useState<PartnerProfile | null>(initialSession?.partner ?? null);
   const [hydrating, setHydrating] = useState<boolean>(Boolean(initialSession));
   const [loading, setLoading] = useState<boolean>(false);
@@ -196,6 +212,7 @@ export function DuaSakuProvider({
   const [categories, setCategories] = useState<CategoryGoal[]>([]);
   const [accounts, setAccounts] = useState<CoupleAccount[]>([]);
   const [accountTotals, setAccountTotals] = useState<AccountTotals>(EMPTY_ACCOUNT_TOTALS);
+  const [transfers, setTransfers] = useState<AccountTransfer[]>([]);
   const [transactions, setTransactions] = useState<CoupleTransaction[]>([]);
   const [budgets, setBudgets] = useState<MonthlyBudget[]>([]);
   const [budgetTotals, setBudgetTotals] = useState<BudgetTotals>(() =>
@@ -210,9 +227,14 @@ export function DuaSakuProvider({
   const [quickEntry, setQuickEntry] = useState<QuickEntryState>(INITIAL_QUICK_ENTRY);
 
   const syncSeqRef = useRef<number>(0);
+  const meRef = useRef<PartnerProfile | null>(me);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedbackSeqRef = useRef<number>(0);
   const confirmBusyRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    meRef.current = me;
+  }, [me]);
 
   const clearFeedbackTimer = useCallback(() => {
     if (feedbackTimerRef.current !== null) {
@@ -271,6 +293,7 @@ export function DuaSakuProvider({
     setCategories([]);
     setAccounts([]);
     setAccountTotals(EMPTY_ACCOUNT_TOTALS);
+    setTransfers([]);
     setTransactions([]);
     setBudgets([]);
     setBudgetTotals(makeEmptyBudgetTotals(month));
@@ -292,10 +315,11 @@ export function DuaSakuProvider({
       const tzOffset = getLocalTzOffset();
 
       try {
-        const [cp, cats, accRes, txs, budRes, sum, ana, nts] = await Promise.all([
+        const [cp, cats, accRes, trList, txs, budRes, sum, ana, nts] = await Promise.all([
           duaSakuApi.getCouple(authToken),
           duaSakuApi.getCategories(authToken),
           duaSakuApi.getAccounts(authToken),
+          duaSakuApi.getAccountTransfers(authToken, { month, tzOffset }),
           duaSakuApi.getTransactions(authToken, { month, tzOffset }),
           duaSakuApi.getBudgets(authToken, { month, tzOffset }),
           duaSakuApi.getSummary(authToken, { month, tzOffset }),
@@ -306,18 +330,17 @@ export function DuaSakuProvider({
         if (seq !== syncSeqRef.current) return;
 
         setCouple(cp);
-        setMe((prev) => {
-          if (!prev) return prev;
-          const updated = cp.partners.find((p) => p.id === prev.id);
-          if (updated) {
-            saveSession(authToken, updated);
-            return updated;
-          }
-          return prev;
-        });
+        const prevMe = meRef.current;
+        if (prevMe) {
+          const updated = cp.partners.find((p) => p.id === prevMe.id);
+          const nextMe = updated ?? prevMe;
+          saveSession(authToken, nextMe, cp);
+          setMe(nextMe);
+        }
         setCategories(cats);
         setAccounts(accRes.accounts);
         setAccountTotals(accRes.totals);
+        setTransfers(trList);
         setTransactions(txs);
         setBudgets(budRes.budgets);
         setBudgetTotals({
@@ -390,6 +413,7 @@ export function DuaSakuProvider({
 
   const refreshAll = useCallback(async () => {
     if (!token) return;
+    clearFeedback();
     setRefreshing(true);
     try {
       await syncAll(token, selectedMonth);
@@ -400,15 +424,16 @@ export function DuaSakuProvider({
     } finally {
       setRefreshing(false);
     }
-  }, [selectedMonth, showError, syncAll, token]);
+  }, [clearFeedback, selectedMonth, showError, syncAll, token]);
 
   const createCouple = useCallback(
     async (coupleName: string, partnerName: string) => {
       setLoading(true);
       try {
         const res = await duaSakuApi.createCouple(coupleName.trim(), partnerName.trim());
-        saveSession(res.token, res.partner);
-        setCouple({ ...res.couple, partners: [res.partner] });
+        const nextCouple = { ...res.couple, partners: [res.partner] };
+        saveSession(res.token, res.partner, nextCouple);
+        setCouple(nextCouple);
         setMe(res.partner);
         setToken(res.token);
         setActiveTab('dashboard');
@@ -432,8 +457,9 @@ export function DuaSakuProvider({
           inviteCode.trim().toUpperCase(),
           partnerName.trim()
         );
-        saveSession(res.token, res.partner);
-        setCouple({ ...res.couple, partners: [res.partner] });
+        const nextCouple = { ...res.couple, partners: [res.partner] };
+        saveSession(res.token, res.partner, nextCouple);
+        setCouple(nextCouple);
         setMe(res.partner);
         setToken(res.token);
         setActiveTab('dashboard');
@@ -643,6 +669,62 @@ export function DuaSakuProvider({
     [requireToken, selectedMonth, showError, showSuccess, syncAll]
   );
 
+  const updateCategory = useCallback(
+    async (id: string, payload: UpdateCategoryPayload): Promise<CategoryGoal> => {
+      const authToken = requireToken();
+      setLoading(true);
+      try {
+        const updated = await duaSakuApi.updateCategory(authToken, id, payload);
+        await syncAll(authToken, selectedMonth);
+        showSuccess(`Pos "${updated.name}" berhasil diperbarui.`);
+        return updated;
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal memperbarui pos keuangan.'), 'Gagal Simpan');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [requireToken, selectedMonth, showError, showSuccess, syncAll]
+  );
+
+  const deleteCategory = useCallback(
+    async (id: string): Promise<void> => {
+      const authToken = requireToken();
+      setLoading(true);
+      try {
+        await duaSakuApi.deleteCategory(authToken, id);
+        await syncAll(authToken, selectedMonth);
+        showSuccess('Pos keuangan berhasil dihapus.');
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal menghapus pos keuangan.'), 'Gagal Hapus');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [requireToken, selectedMonth, showError, showSuccess, syncAll]
+  );
+
+  const transferAccounts = useCallback(
+    async (payload: TransferAccountPayload): Promise<TransferAccountResponse> => {
+      const authToken = requireToken();
+      setLoading(true);
+      try {
+        const res = await duaSakuApi.transferAccounts(authToken, payload);
+        await syncAll(authToken, selectedMonth);
+        showSuccess('Transfer antar dompet berhasil dicatat.');
+        return res;
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal melakukan transfer antar dompet.'), 'Gagal Transfer');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [requireToken, selectedMonth, showError, showSuccess, syncAll]
+  );
+
   const createNote = useCallback(
     async (payload: CreateNotePayload): Promise<SharedNote> => {
       const authToken = requireToken();
@@ -660,6 +742,104 @@ export function DuaSakuProvider({
       }
     },
     [requireToken, selectedMonth, showError, showSuccess, syncAll]
+  );
+
+  const updateNote = useCallback(
+    async (id: string, payload: UpdateNotePayload): Promise<SharedNote> => {
+      const authToken = requireToken();
+      setLoading(true);
+      try {
+        const updated = await duaSakuApi.updateNote(authToken, id, payload);
+        await syncAll(authToken, selectedMonth);
+        showSuccess('Catatan bersama berhasil diperbarui.');
+        return updated;
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal memperbarui catatan.'), 'Gagal Simpan');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [requireToken, selectedMonth, showError, showSuccess, syncAll]
+  );
+
+  const deleteNote = useCallback(
+    async (id: string): Promise<void> => {
+      const authToken = requireToken();
+      setLoading(true);
+      try {
+        await duaSakuApi.deleteNote(authToken, id);
+        await syncAll(authToken, selectedMonth);
+        showSuccess('Catatan bersama berhasil dihapus.');
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal menghapus catatan.'), 'Gagal Hapus');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [requireToken, selectedMonth, showError, showSuccess, syncAll]
+  );
+
+  const updateCoupleProfile = useCallback(
+    async (payload: UpdateCouplePayload): Promise<UpdateCoupleResponse> => {
+      const authToken = requireToken();
+      setLoading(true);
+      try {
+        const updated = await duaSakuApi.updateCouple(authToken, payload);
+        saveSession(authToken, updated.partner, updated.couple);
+        setCouple(updated.couple);
+        setMe(updated.partner);
+        await syncAll(authToken, selectedMonth);
+        showSuccess('Profil ruang pasangan berhasil diperbarui.');
+        return updated;
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal memperbarui profil ruang pasangan.'), 'Gagal Simpan');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [requireToken, selectedMonth, showError, showSuccess, syncAll]
+  );
+
+  const exportMonthlyReport = useCallback(
+    async (format: 'csv' | 'json'): Promise<void> => {
+      const authToken = requireToken();
+      const tzOffset = getLocalTzOffset();
+      setLoading(true);
+      try {
+        if (format === 'csv') {
+          const csv = await duaSakuApi.exportMonthlyCsv(authToken, {
+            month: selectedMonth,
+            tzOffset,
+          });
+          await triggerExportDownload(
+            `duasaku-${selectedMonth}.csv`,
+            csv,
+            'text/csv;charset=utf-8'
+          );
+          showSuccess(`Laporan CSV bulan ${selectedMonth} berhasil diekspor.`);
+        } else {
+          const jsonReport = await duaSakuApi.exportMonthlyJson(authToken, {
+            month: selectedMonth,
+            tzOffset,
+          });
+          await triggerExportDownload(
+            `duasaku-${selectedMonth}.json`,
+            JSON.stringify(jsonReport, null, 2),
+            'application/json;charset=utf-8'
+          );
+          showSuccess(`Laporan JSON bulan ${selectedMonth} berhasil diekspor.`);
+        }
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal mengekspor laporan bulanan.'), 'Gagal Ekspor');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [requireToken, selectedMonth, showError, showSuccess]
   );
 
   const requestConfirm = useCallback((req: ConfirmRequest) => {
@@ -737,6 +917,7 @@ export function DuaSakuProvider({
       categories,
       accounts,
       accountTotals,
+      transfers,
       transactions,
       budgets,
       budgetTotals,
@@ -759,6 +940,7 @@ export function DuaSakuProvider({
       closeQuickEntry,
       createCouple,
       joinCouple,
+      updateCoupleProfile,
       logout,
       refreshAll,
       createTransaction,
@@ -767,11 +949,17 @@ export function DuaSakuProvider({
       createAccount,
       updateAccount,
       deleteAccount,
+      transferAccounts,
       saveBudget,
       updateBudget,
       deleteBudget,
       createCategory,
+      updateCategory,
+      deleteCategory,
       createNote,
+      updateNote,
+      deleteNote,
+      exportMonthlyReport,
     }),
     [
       token,
@@ -786,6 +974,7 @@ export function DuaSakuProvider({
       categories,
       accounts,
       accountTotals,
+      transfers,
       transactions,
       budgets,
       budgetTotals,
@@ -807,6 +996,7 @@ export function DuaSakuProvider({
       closeQuickEntry,
       createCouple,
       joinCouple,
+      updateCoupleProfile,
       logout,
       refreshAll,
       createTransaction,
@@ -815,11 +1005,17 @@ export function DuaSakuProvider({
       createAccount,
       updateAccount,
       deleteAccount,
+      transferAccounts,
       saveBudget,
       updateBudget,
       deleteBudget,
       createCategory,
+      updateCategory,
+      deleteCategory,
       createNote,
+      updateNote,
+      deleteNote,
+      exportMonthlyReport,
     ]
   );
 
