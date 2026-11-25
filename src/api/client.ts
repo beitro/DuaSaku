@@ -4,6 +4,7 @@ import type {
   AccountTransfer,
   AccountsResponse,
   AuthResponse,
+  BootstrapPayload,
   BudgetsResponse,
   CategoryGoal,
   CoupleAccount,
@@ -12,13 +13,23 @@ import type {
   CoupleTransaction,
   CreateAccountPayload,
   CreateCategoryPayload,
+  CreateDebtLoanPayload,
   CreateNotePayload,
+  CreateQuickPresetPayload,
+  CreateRecurringRulePayload,
   CreateTransactionPayload,
+  DebtLoan,
   DeleteResponse,
   HealthResponse,
   MonthlyAnalytics,
   MonthlyBudget,
   MonthlyExportJson,
+  PayRecurringRulePayload,
+  PayRecurringRuleResponse,
+  QuickPreset,
+  ReceiptParseResult,
+  RecurringRule,
+  SettleDebtLoanPayload,
   SharedNote,
   TransactionFilterParams,
   TransferAccountPayload,
@@ -29,6 +40,7 @@ import type {
   UpdateCouplePayload,
   UpdateCoupleResponse,
   UpdateNotePayload,
+  UpdateRecurringRulePayload,
   UpdateTransactionPayload,
   UpsertBudgetPayload,
 } from '../types';
@@ -421,4 +433,76 @@ export const duaSakuApi = {
     });
     return request<MonthlyExportJson>(`/api/export${query}`, { token });
   },
+
+  getBootstrap: (
+    token: string,
+    params: { month?: string; tzOffset?: number } = {}
+  ): Promise<BootstrapPayload> => {
+    const query = buildQuery({
+      month: params.month,
+      tzOffset: params.tzOffset ?? defaultTzOffset(),
+    });
+    return request<BootstrapPayload>(`/api/bootstrap${query}`, { token });
+  },
+
+  getRecurringRules: (token: string): Promise<RecurringRule[]> =>
+    request<RecurringRule[]>('/api/recurring', { token }),
+
+  createRecurringRule: (
+    token: string,
+    payload: CreateRecurringRulePayload
+  ): Promise<RecurringRule> =>
+    request<RecurringRule>('/api/recurring', { token, method: 'POST', body: payload }),
+
+  updateRecurringRule: (
+    token: string,
+    id: string,
+    payload: UpdateRecurringRulePayload
+  ): Promise<RecurringRule> =>
+    request<RecurringRule>(`/api/recurring/${id}`, { token, method: 'PATCH', body: payload }),
+
+  deleteRecurringRule: (token: string, id: string): Promise<DeleteResponse> =>
+    request<DeleteResponse>(`/api/recurring/${id}`, { token, method: 'DELETE' }),
+
+  payRecurringRule: (
+    token: string,
+    id: string,
+    payload: PayRecurringRulePayload = {}
+  ): Promise<PayRecurringRuleResponse> =>
+    request<PayRecurringRuleResponse>(`/api/recurring/${id}/pay`, {
+      token,
+      method: 'POST',
+      body: payload,
+    }),
+
+  getDebts: (token: string): Promise<DebtLoan[]> => request<DebtLoan[]>('/api/debts', { token }),
+
+  createDebt: (token: string, payload: CreateDebtLoanPayload): Promise<DebtLoan> =>
+    request<DebtLoan>('/api/debts', { token, method: 'POST', body: payload }),
+
+  settleDebt: (
+    token: string,
+    id: string,
+    payload: SettleDebtLoanPayload = {}
+  ): Promise<DebtLoan> =>
+    request<DebtLoan>(`/api/debts/${id}/settle`, { token, method: 'POST', body: payload }),
+
+  deleteDebt: (token: string, id: string): Promise<DeleteResponse> =>
+    request<DeleteResponse>(`/api/debts/${id}`, { token, method: 'DELETE' }),
+
+  getPresets: (token: string): Promise<QuickPreset[]> =>
+    request<QuickPreset[]>('/api/presets', { token }),
+
+  createPreset: (token: string, payload: CreateQuickPresetPayload): Promise<QuickPreset> =>
+    request<QuickPreset>('/api/presets', { token, method: 'POST', body: payload }),
+
+  deletePreset: (token: string, id: string): Promise<DeleteResponse> =>
+    request<DeleteResponse>(`/api/presets/${id}`, { token, method: 'DELETE' }),
+
+  parseReceipt: (token: string, text: string): Promise<ReceiptParseResult> =>
+    request<ReceiptParseResult>('/api/receipts/parse', {
+      token,
+      method: 'POST',
+      body: { text },
+    }),
 };

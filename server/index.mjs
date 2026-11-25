@@ -27,15 +27,24 @@ const DEFAULT_CATEGORIES = [
   { name: 'Rumah Tangga', icon: '🏠', color: '#D08E35', targetAmount: 10000000, isDefault: true },
 ];
 
+const DEFAULT_QUICK_PRESETS = [
+  { label: 'Kopi Pagi', type: 'expense', amount: 25000, categoryKeyword: 'Rumah Tangga', note: 'Kopi pagi' },
+  { label: 'Makan Siang', type: 'expense', amount: 45000, categoryKeyword: 'Rumah Tangga', note: 'Makan siang' },
+  { label: 'Transportasi', type: 'expense', amount: 30000, categoryKeyword: 'Traveling', note: 'Ongkos transportasi' },
+];
+
 const PARTNER_A_COLOR = '#5B8260';
 const PARTNER_B_COLOR = '#C86446';
 const DEFAULT_CATEGORY_COLOR = '#8C6D5A';
 const DEFAULT_ACCOUNT_ICON = '💳';
 const DEFAULT_ACCOUNT_COLOR = '#5F8563';
 const ACCOUNT_TYPES = ['cash', 'bank', 'ewallet', 'shared_savings', 'other'];
+const RECURRING_FREQUENCIES = ['weekly', 'monthly', 'yearly'];
+const DEBT_DIRECTIONS = ['payable', 'receivable'];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+const DATE_YMD_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -188,6 +197,455 @@ function buildMonthlyBudget(budgetRow, spentAmount) {
   };
 }
 
+function parseRequiredText(val, message) {
+  if (
+    val === undefined ||
+    val === null ||
+    typeof val === 'boolean' ||
+    Array.isArray(val) ||
+    typeof val === 'object'
+  ) {
+    throw new HttpError(400, message);
+  }
+  const clean = String(val).trim();
+  if (!clean) {
+    throw new HttpError(400, message);
+  }
+  return clean;
+}
+
+function getTodayYmd() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function parseDateYmd(val, message = 'Format tanggal harus YYYY-MM-DD.', { allowUndefined = false, allowNull = false } = {}) {
+  if (val === undefined) {
+    if (allowUndefined) return getTodayYmd();
+    throw new HttpError(400, message);
+  }
+  if (val === null || val === '') {
+    if (allowNull) return null;
+    throw new HttpError(400, message);
+  }
+  if (typeof val !== 'string') {
+    throw new HttpError(400, message);
+  }
+  const clean = val.trim();
+  const m = DATE_YMD_RE.exec(clean);
+  if (!m) {
+    throw new HttpError(400, message);
+  }
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
+    throw new HttpError(400, message);
+  }
+  return clean;
+}
+
+function formatUtcYmd(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function advanceDueDate(dateYmd, frequency) {
+  const [, yStr, mStr, dStr] = DATE_YMD_RE.exec(dateYmd);
+  const year = Number(yStr);
+  const month = Number(mStr);
+  const day = Number(dStr);
+
+  if (frequency === 'weekly') {
+    return formatUtcYmd(new Date(Date.UTC(year, month - 1, day + 7)));
+  }
+  if (frequency === 'monthly') {
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    const maxDay = new Date(Date.UTC(nextYear, nextMonth, 0)).getUTCDate();
+    return `${nextYear}-${String(nextMonth).padStart(2, '0')}-${String(Math.min(day, maxDay)).padStart(2, '0')}`;
+  }
+  const nextYear = year + 1;
+  const maxDay = new Date(Date.UTC(nextYear, month, 0)).getUTCDate();
+  return `${nextYear}-${String(month).padStart(2, '0')}-${String(Math.min(day, maxDay)).padStart(2, '0')}`;
+}
+
+function buildSummaryPayload(monthStr, partners, categories, transactions) {
+  let totalIncome = 0;
+  let totalExpense = 0;
+  const partnerMap = new Map(
+    partners.map((p) => [p.id, { partnerId: p.id, partnerName: p.name, income: 0, expense: 0, net: 0 }])
+  );
+  const catMap = new Map(
+    categories.map((c) => [
+      c.id,
+      { categoryId: c.id, categoryName: c.name, icon: c.icon, color: c.color, targetAmount: c.targetAmount, spent: 0, income: 0 },
+    ])
+  );
+
+  for (const tx of transactions) {
+    if (tx.type === 'income') totalIncome = roundMoney(totalIncome + tx.amount);
+    else totalExpense = roundMoney(totalExpense + tx.amount);
+
+    const pEntry = partnerMap.get(tx.partnerId);
+    if (pEntry) {
+      if (tx.type === 'income') pEntry.income = roundMoney(pEntry.income + tx.amount);
+      else pEntry.expense = roundMoney(pEntry.expense + tx.amount);
+      pEntry.net = roundMoney(pEntry.income - pEntry.expense);
+    }
+
+    const cEntry = catMap.get(tx.categoryId);
+    if (cEntry) {
+      if (tx.type === 'income') cEntry.income = roundMoney(cEntry.income + tx.amount);
+      else cEntry.spent = roundMoney(cEntry.spent + tx.amount);
+    }
+  }
+
+  const payload = {
+    totalIncome,
+    totalExpense,
+    netBalance: roundMoney(totalIncome - totalExpense),
+    byPartner: Array.from(partnerMap.values()),
+    byCategory: Array.from(catMap.values()),
+  };
+  if (monthStr) payload.month = monthStr;
+  return payload;
+}
+
+function buildAnalyticsPayload(monthStr, partners, categories, accounts, transactions) {
+  let totalIncome = 0;
+  let totalExpense = 0;
+
+  const partnerMap = new Map(
+    partners.map((p) => [
+      p.id,
+      {
+        partnerId: p.id,
+        partnerName: p.name,
+        roleLabel: p.roleLabel,
+        avatarColor: p.avatarColor,
+        income: 0,
+        expense: 0,
+        net: 0,
+        transactionCount: 0,
+        incomePercent: 0,
+        expensePercent: 0,
+      },
+    ])
+  );
+
+  const catMap = new Map(
+    categories.map((c) => [
+      c.id,
+      {
+        categoryId: c.id,
+        categoryName: c.name,
+        icon: c.icon,
+        color: c.color,
+        targetAmount: roundMoney(c.targetAmount),
+        spent: 0,
+        expense: 0,
+        income: 0,
+        transactionCount: 0,
+        expensePercent: 0,
+        incomePercent: 0,
+      },
+    ])
+  );
+
+  for (const tx of transactions) {
+    const amt = roundMoney(tx.amount);
+    if (tx.type === 'income') totalIncome = roundMoney(totalIncome + amt);
+    else totalExpense = roundMoney(totalExpense + amt);
+
+    const pEntry = partnerMap.get(tx.partnerId);
+    if (pEntry) {
+      pEntry.transactionCount += 1;
+      if (tx.type === 'income') pEntry.income = roundMoney(pEntry.income + amt);
+      else pEntry.expense = roundMoney(pEntry.expense + amt);
+      pEntry.net = roundMoney(pEntry.income - pEntry.expense);
+    }
+
+    const cEntry = catMap.get(tx.categoryId);
+    if (cEntry) {
+      cEntry.transactionCount += 1;
+      if (tx.type === 'income') {
+        cEntry.income = roundMoney(cEntry.income + amt);
+      } else {
+        cEntry.expense = roundMoney(cEntry.expense + amt);
+        cEntry.spent = cEntry.expense;
+      }
+    }
+  }
+
+  const netBalance = roundMoney(totalIncome - totalExpense);
+  const savingsRate = totalIncome > 0 ? Math.round((netBalance / totalIncome) * 1000) / 10 : 0;
+
+  const byPartner = Array.from(partnerMap.values()).map((p) => ({
+    ...p,
+    incomePercent: totalIncome > 0 ? Math.round((p.income / totalIncome) * 1000) / 10 : 0,
+    expensePercent: totalExpense > 0 ? Math.round((p.expense / totalExpense) * 1000) / 10 : 0,
+  }));
+
+  const byCategory = Array.from(catMap.values())
+    .map((c) => ({
+      ...c,
+      expensePercent: totalExpense > 0 ? Math.round((c.expense / totalExpense) * 1000) / 10 : 0,
+      incomePercent: totalIncome > 0 ? Math.round((c.income / totalIncome) * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => b.expense - a.expense || b.income - a.income || a.categoryName.localeCompare(b.categoryName));
+
+  return {
+    month: monthStr,
+    totals: {
+      totalIncome,
+      totalExpense,
+      netBalance,
+      savingsRate,
+      transactionCount: transactions.length,
+    },
+    byCategory,
+    byPartner,
+    accountsOverview: {
+      ...computeAccountTotals(accounts),
+      accountsCount: accounts.length,
+    },
+  };
+}
+
+// ============================================================================
+// Receipt Parsing & Category Auto-Suggest Helpers
+// ============================================================================
+const RECEIPT_CATEGORY_GROUPS = [
+  {
+    receiptKeywords: [
+      'kopi', 'coffee', 'cafe', 'kafe', 'starbucks', 'kenangan', 'janji jiwa', 'fore', 'tuku',
+      'resto', 'restoran', 'restaurant', 'warung', 'rumah makan', 'makan', 'minum', 'nasi',
+      'ayam', 'bakso', 'mie', 'soto', 'sate', 'bistro', 'bakery', 'roti', 'kue', 'boba',
+      'indomaret', 'alfamart', 'alfamidi', 'supermarket', 'minimarket', 'superindo', 'hypermart',
+      'transmart', 'lotte', 'ranch market', 'grabfood', 'gofood', 'shopeefood', 'grocery',
+      'groceries', 'food', 'drink', 'beverage', 'snack', 'dining', 'kuliner',
+    ],
+    categoryMatchStrong: ['makan', 'minum', 'kuliner', 'kopi', 'coffee', 'food', 'dining', 'f&b', 'belanja', 'grocer'],
+    categoryMatchFallback: ['rumah tangga', 'harian', 'kebutuhan', 'household'],
+  },
+  {
+    receiptKeywords: [
+      'bensin', 'pertamina', 'spbu', 'shell', 'pertalite', 'pertamax', 'solar', 'fuel', 'bbm',
+      'grab', 'gojek', 'goride', 'gocar', 'grabcar', 'grabbike', 'maxim', 'bluebird', 'taksi',
+      'taxi', 'ojek', 'parkir', 'parking', 'tol', 'e-toll', 'kereta', 'kai', 'mrt', 'lrt',
+      'transjakarta', 'bus', 'transport', 'transportasi',
+    ],
+    categoryMatchStrong: ['transport', 'bensin', 'kendaraan', 'ojek', 'komuter', 'mobilitas'],
+    categoryMatchFallback: ['travel', 'perjalanan', 'rumah tangga'],
+  },
+  {
+    receiptKeywords: [
+      'pesawat', 'flight', 'garuda', 'citilink', 'airasia', 'hotel',
+      'traveloka', 'tiket', 'agoda', 'airbnb', 'travel', 'liburan', 'wisata',
+    ],
+    categoryMatchStrong: ['travel', 'liburan', 'perjalanan', 'wisata'],
+    categoryMatchFallback: ['transport', 'transportasi'],
+  },
+  {
+    receiptKeywords: [
+      'listrik', 'pln', 'token', 'pdam', 'wifi', 'internet', 'indihome', 'biznet', 'firstmedia',
+      'myrepublic', 'telkom', 'pulsa', 'paket data', 'telkomsel', 'indosat', 'elpiji', 'gas',
+      'sewa', 'kontrakan', 'kos', 'ipl', 'tagihan', 'utility', 'utilities', 'bill', 'ikea',
+      'ace hardware', 'mr diy', 'detergen', 'sabun',
+    ],
+    categoryMatchStrong: ['tagihan', 'listrik', 'utilitas', 'internet', 'bill', 'utilities', 'rumah tangga', 'household', 'rumah', 'home'],
+    categoryMatchFallback: ['kebutuhan', 'harian'],
+  },
+  {
+    receiptKeywords: [
+      'apotek', 'apotik', 'kimia farma', 'k24', 'century', 'guardian', 'watsons', 'halodoc',
+      'alodokter', 'klinik', 'clinic', 'rumah sakit', 'hospital', 'dokter', 'doctor', 'obat',
+      'vitamin', 'farmasi', 'pharmacy', 'health', 'medis', 'medical', 'prodia', 'kesehatan',
+    ],
+    categoryMatchStrong: ['kesehatan', 'health', 'medis', 'medical', 'obat', 'apotek'],
+    categoryMatchFallback: ['keluarga', 'rumah tangga'],
+  },
+  {
+    receiptKeywords: [
+      'wedding', 'nikah', 'menikah', 'bridal', 'catering', 'undangan', 'souvenir', 'mahar', 'cincin', 'florist',
+    ],
+    categoryMatchStrong: ['menikah', 'wedding', 'pernikahan', 'acara'],
+    categoryMatchFallback: [],
+  },
+  {
+    receiptKeywords: [
+      'investasi', 'reksadana', 'saham', 'bibit', 'bareksa', 'ajaib', 'emas', 'antam', 'pegadaian', 'deposito', 'investment',
+    ],
+    categoryMatchStrong: ['investasi', 'investment', 'tabungan', 'saving'],
+    categoryMatchFallback: [],
+  },
+];
+
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countKeywordHits(textLower, keywords) {
+  let hits = 0;
+  for (const kw of keywords) {
+    const re = new RegExp(`(?:^|[^a-z0-9])${escapeRegExp(kw)}(?:$|[^a-z0-9])`, 'i');
+    if (re.test(textLower)) hits += 1;
+  }
+  return hits;
+}
+
+function extractReceiptMerchant(text) {
+  const lines = String(text)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+  for (const line of lines) {
+    if (/^[\s=*_\-#.~:|/\\]+$/.test(line)) continue;
+    const stripped = line.replace(/^[=*#\s-]+|[=*#\s-]+$/g, '').trim();
+    if (stripped) return stripped;
+  }
+  return lines[0];
+}
+
+function parseReceiptMoneyToken(raw, { hasCurrencyOrGrouping = false } = {}) {
+  if (!raw) return null;
+  let cleaned = String(raw)
+    .trim()
+    .replace(/^(?:rp\.?|idr)\s*/i, '')
+    .replace(/(?:,-|\/-|\.-)$/, '')
+    .trim();
+  if (!cleaned) return null;
+  const decMatch = /^(.+?)[.,](\d{1,2})$/.exec(cleaned);
+  if (decMatch && decMatch[1]) {
+    cleaned = decMatch[1];
+  }
+  const digits = cleaned.replace(/[.,\s]/g, '');
+  if (!/^\d+$/.test(digits)) return null;
+  const maxLen = hasCurrencyOrGrouping ? 11 : 9;
+  if (digits.length > maxLen) return null;
+  const num = Number(digits);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return num;
+}
+
+function extractAmountsFromLine(line) {
+  const sanitized = line
+    .replace(/\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b/g, ' ')
+    .replace(/\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b/g, ' ')
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ')
+    .replace(/\b\d+(?:-\d+)+\b/g, ' ');
+  const found = [];
+  const tokenRe = /((?:rp\.?|idr)\s*\d[\d.,]*(?:,-|\/-|\.-)?|\b\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?(?:,-|\/-|\.-)?|\b\d+(?:[.,]\d{1,2})?)/gi;
+  let m;
+  while ((m = tokenRe.exec(sanitized)) !== null) {
+    const tok = m[1];
+    const hasPrefixOrGroup = /(?:rp|idr)/i.test(tok) || /\d{1,3}(?:[.,]\d{3})+/.test(tok);
+    const val = parseReceiptMoneyToken(tok, { hasCurrencyOrGrouping: hasPrefixOrGroup });
+    if (val !== null && (hasPrefixOrGroup || val >= 100)) {
+      found.push(val);
+    }
+  }
+  return found;
+}
+
+function parseReceiptAmount(text) {
+  const lines = String(text)
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const ignoreTotalRe = /\b(tunai|cash|kembali|kembalian|change|diskon|discount|hemat|qty|item|items)\b/i;
+  const primaryTotalRe = /\b(grand\s*total|total\s*bayar|total\s*belanja|total\s*tagihan|total\s*pembayaran|total\s*harga|amount\s*due|net\s*total)\b/i;
+  const secondaryTotalRe = /\b(total|jumlah|tagihan|bayar)\b/i;
+  const subTotalRe = /\bsub[\s-]*total\b/i;
+
+  const primaryCandidates = [];
+  const secondaryCandidates = [];
+  const currencyCandidates = [];
+  const allCandidates = [];
+
+  for (const line of lines) {
+    const amounts = extractAmountsFromLine(line);
+    if (amounts.length === 0) continue;
+
+    const isIgnored = ignoreTotalRe.test(line);
+    if (!isIgnored && primaryTotalRe.test(line)) {
+      primaryCandidates.push(...amounts);
+    } else if (!isIgnored && !subTotalRe.test(line) && secondaryTotalRe.test(line)) {
+      secondaryCandidates.push(...amounts);
+    }
+
+    if (!isIgnored) {
+      const currencyRe = /(?:rp\.?|idr)\s*(\d[\d.,]*(?:,-|\/-|\.-)?)/gi;
+      let cm;
+      while ((cm = currencyRe.exec(line)) !== null) {
+        const val = parseReceiptMoneyToken(cm[1], { hasCurrencyOrGrouping: true });
+        if (val !== null) currencyCandidates.push(val);
+      }
+      allCandidates.push(...amounts);
+    }
+  }
+
+  if (primaryCandidates.length > 0) return Math.max(...primaryCandidates);
+  if (secondaryCandidates.length > 0) return Math.max(...secondaryCandidates);
+  if (currencyCandidates.length > 0) return Math.max(...currencyCandidates);
+  if (allCandidates.length > 0) return Math.max(...allCandidates);
+
+  // Last resort across all lines if every line matched ignore keywords
+  const fallback = lines.flatMap(extractAmountsFromLine);
+  return fallback.length > 0 ? Math.max(...fallback) : null;
+}
+
+function suggestReceiptCategory(text, categories) {
+  if (!categories || categories.length === 0) {
+    return { suggestedCategoryId: null, suggestedCategoryName: null };
+  }
+  const textLower = String(text).toLowerCase();
+  const groupHits = RECEIPT_CATEGORY_GROUPS.map((group) => ({
+    group,
+    hits: countKeywordHits(textLower, group.receiptKeywords),
+  })).filter((g) => g.hits > 0);
+
+  let best = null;
+  let bestScore = 0;
+
+  for (const cat of categories) {
+    const catLower = String(cat.name || '').toLowerCase();
+    let score = 0;
+
+    for (const { group, hits } of groupHits) {
+      if (group.categoryMatchStrong.some((kw) => catLower.includes(kw))) {
+        score += hits * 10;
+      } else if (group.categoryMatchFallback.some((kw) => catLower.includes(kw))) {
+        score += hits * 3;
+      }
+    }
+
+    const catWords = catLower
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 3 && !['dan', 'and', 'untuk', 'for'].includes(w));
+    for (const word of catWords) {
+      if (countKeywordHits(textLower, [word]) > 0) {
+        score += 12;
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = cat;
+    }
+  }
+
+  if (!best) {
+    return { suggestedCategoryId: null, suggestedCategoryName: null };
+  }
+  return { suggestedCategoryId: best.id, suggestedCategoryName: best.name };
+}
+
 // ============================================================================
 // Storage Adapter (PostgreSQL if DATABASE_URL is set, else In-Memory Store)
 // ============================================================================
@@ -201,6 +659,9 @@ const mem = {
   transfers: new Map(), // coupleId -> AccountTransfer[]
   budgets: new Map(), // coupleId -> Budget[]
   notes: new Map(), // coupleId -> Note[]
+  recurringRules: new Map(), // coupleId -> RecurringRule[]
+  debtLoans: new Map(), // coupleId -> DebtLoan[]
+  quickPresets: new Map(), // coupleId -> QuickPreset[]
 };
 
 const usePg = Boolean(process.env.DATABASE_URL);
@@ -310,6 +771,137 @@ function hydrateMemTransfer(tr, coupleId) {
   };
 }
 
+function hydrateMemRecurringRule(rule, coupleId) {
+  const creator = mem.partners.get(rule.createdBy);
+  const cat = (mem.categories.get(coupleId) || []).find((c) => c.id === rule.categoryId);
+  const acc = rule.accountId ? (mem.accounts.get(coupleId) || []).find((a) => a.id === rule.accountId) : null;
+  return {
+    id: rule.id,
+    coupleId: rule.coupleId,
+    title: rule.title,
+    type: rule.type,
+    amount: roundMoney(rule.amount),
+    categoryId: rule.categoryId,
+    categoryName: cat ? cat.name : rule.categoryName || '',
+    categoryIcon: cat ? cat.icon : rule.categoryIcon || '✨',
+    accountId: acc ? acc.id : null,
+    accountName: acc ? acc.name : null,
+    accountIcon: acc ? acc.icon : null,
+    frequency: rule.frequency,
+    nextDueDate: rule.nextDueDate,
+    active: Boolean(rule.active),
+    createdBy: rule.createdBy,
+    createdByName: creator ? creator.name : rule.createdByName || '',
+    createdAt: rule.createdAt,
+  };
+}
+
+function hydrateMemDebtLoan(debt) {
+  const creator = mem.partners.get(debt.createdBy);
+  const amount = roundMoney(debt.amount);
+  const paidAmount = roundMoney(debt.paidAmount);
+  return {
+    id: debt.id,
+    coupleId: debt.coupleId,
+    personName: debt.personName,
+    direction: debt.direction,
+    amount,
+    paidAmount,
+    remainingAmount: roundMoney(Math.max(0, amount - paidAmount)),
+    note: debt.note,
+    dueDate: debt.dueDate ?? null,
+    settled: Boolean(debt.settled),
+    createdBy: debt.createdBy,
+    createdByName: creator ? creator.name : debt.createdByName || '',
+    createdAt: debt.createdAt,
+  };
+}
+
+function hydrateMemQuickPreset(preset, coupleId) {
+  const cat = preset.categoryId
+    ? (mem.categories.get(coupleId) || []).find((c) => c.id === preset.categoryId)
+    : null;
+  const acc = preset.accountId
+    ? (mem.accounts.get(coupleId) || []).find((a) => a.id === preset.accountId)
+    : null;
+  return {
+    id: preset.id,
+    coupleId: preset.coupleId,
+    label: preset.label,
+    type: preset.type,
+    amount: roundMoney(preset.amount),
+    categoryId: cat ? cat.id : null,
+    categoryName: cat ? cat.name : null,
+    categoryIcon: cat ? cat.icon : null,
+    accountId: acc ? acc.id : null,
+    accountName: acc ? acc.name : null,
+    accountIcon: acc ? acc.icon : null,
+    note: preset.note,
+    createdAt: preset.createdAt,
+  };
+}
+
+function resolveDefaultPresetCategory(categories, keyword) {
+  if (!categories || categories.length === 0) return null;
+  const kwLower = String(keyword || '').toLowerCase();
+  const match = categories.find((c) => String(c.name || '').toLowerCase().includes(kwLower));
+  return (match || categories[0]).id;
+}
+
+async function seedCoupleDefaultsPg(client, coupleId) {
+  const seededCategories = [];
+  for (const cat of DEFAULT_CATEGORIES) {
+    const catId = randomUUID();
+    await client.query(
+      'INSERT INTO categories(id, couple_id, name, icon, color, target_amount, is_default) VALUES($1,$2,$3,$4,$5,$6,$7)',
+      [catId, coupleId, cat.name, cat.icon, cat.color, cat.targetAmount, cat.isDefault]
+    );
+    seededCategories.push({ id: catId, name: cat.name });
+  }
+  if (seededCategories.length > 0) {
+    for (const preset of DEFAULT_QUICK_PRESETS) {
+      const catId = resolveDefaultPresetCategory(seededCategories, preset.categoryKeyword);
+      await client.query(
+        'INSERT INTO quick_presets(id, couple_id, label, type, amount, category_id, account_id, note) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+        [randomUUID(), coupleId, preset.label, preset.type, preset.amount, catId, null, preset.note]
+      );
+    }
+  }
+}
+
+function seedCoupleDefaultsMem(coupleId, nowMs) {
+  const cats = DEFAULT_CATEGORIES.map((cat, idx) => ({
+    id: randomUUID(),
+    coupleId,
+    ...cat,
+    createdAtMs: nowMs + idx,
+  }));
+  mem.categories.set(coupleId, cats);
+  mem.accounts.set(coupleId, []);
+  mem.transactions.set(coupleId, []);
+  mem.transfers.set(coupleId, []);
+  mem.budgets.set(coupleId, []);
+  mem.notes.set(coupleId, []);
+  mem.recurringRules.set(coupleId, []);
+  mem.debtLoans.set(coupleId, []);
+  const seededPresets =
+    cats.length > 0
+      ? DEFAULT_QUICK_PRESETS.map((preset, idx) => ({
+          id: randomUUID(),
+          coupleId,
+          label: preset.label,
+          type: preset.type,
+          amount: preset.amount,
+          categoryId: resolveDefaultPresetCategory(cats, preset.categoryKeyword),
+          accountId: null,
+          note: preset.note,
+          createdAt: new Date(nowMs + idx).toISOString(),
+          createdAtMs: nowMs + idx,
+        }))
+      : [];
+  mem.quickPresets.set(coupleId, seededPresets);
+}
+
 const makeInviteCode = () => randomBytes(3).toString('hex').toUpperCase();
 const makeToken = () => randomBytes(24).toString('base64url');
 
@@ -376,12 +968,7 @@ app.post(
           'INSERT INTO partners(id, couple_id, name, role_label, avatar_color, token) VALUES($1,$2,$3,$4,$5,$6)',
           [partnerId, coupleId, cleanPartnerName, 'Partner A', PARTNER_A_COLOR, token]
         );
-        for (const cat of DEFAULT_CATEGORIES) {
-          await client.query(
-            'INSERT INTO categories(id, couple_id, name, icon, color, target_amount, is_default) VALUES($1,$2,$3,$4,$5,$6,$7)',
-            [randomUUID(), coupleId, cat.name, cat.icon, cat.color, cat.targetAmount, cat.isDefault]
-          );
-        }
+        await seedCoupleDefaultsPg(client, coupleId);
       });
     } else {
       const nowMs = Date.now();
@@ -396,15 +983,7 @@ app.post(
       };
       mem.partners.set(partnerId, partner);
       mem.tokens.set(token, partnerId);
-      mem.categories.set(
-        coupleId,
-        DEFAULT_CATEGORIES.map((cat, idx) => ({ id: randomUUID(), coupleId, ...cat, createdAtMs: nowMs + idx }))
-      );
-      mem.accounts.set(coupleId, []);
-      mem.transactions.set(coupleId, []);
-      mem.transfers.set(coupleId, []);
-      mem.budgets.set(coupleId, []);
-      mem.notes.set(coupleId, []);
+      seedCoupleDefaultsMem(coupleId, nowMs);
     }
 
     res.status(201).json({
@@ -560,12 +1139,7 @@ app.post(
           'INSERT INTO partners(id, couple_id, name, role_label, avatar_color, token, email, password_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
           [partnerId, coupleId, cleanPartnerName, 'Partner A', PARTNER_A_COLOR, token, cleanEmail, passwordHash]
         );
-        for (const cat of DEFAULT_CATEGORIES) {
-          await client.query(
-            'INSERT INTO categories(id, couple_id, name, icon, color, target_amount, is_default) VALUES($1,$2,$3,$4,$5,$6,$7)',
-            [randomUUID(), coupleId, cat.name, cat.icon, cat.color, cat.targetAmount, cat.isDefault]
-          );
-        }
+        await seedCoupleDefaultsPg(client, coupleId);
       });
       return res.status(201).json({
         token,
@@ -637,15 +1211,7 @@ app.post(
     };
     mem.partners.set(partnerId, partner);
     mem.tokens.set(token, partnerId);
-    mem.categories.set(
-      coupleId,
-      DEFAULT_CATEGORIES.map((cat, idx) => ({ id: randomUUID(), coupleId, ...cat, createdAtMs: nowMs + idx }))
-    );
-    mem.accounts.set(coupleId, []);
-    mem.transactions.set(coupleId, []);
-    mem.transfers.set(coupleId, []);
-    mem.budgets.set(coupleId, []);
-    mem.notes.set(coupleId, []);
+    seedCoupleDefaultsMem(coupleId, nowMs);
 
     res.status(201).json({
       token,
@@ -987,7 +1553,7 @@ app.delete(
           throw new HttpError(404, 'Kategori tidak ditemukan.');
         }
 
-        const [txRef, bdgRef, noteRef] = await Promise.all([
+        const [txRef, bdgRef, noteRef, recRef] = await Promise.all([
           client.query('SELECT 1 FROM transactions WHERE couple_id = $1 AND category_id = $2 LIMIT 1', [
             coupleId,
             categoryId,
@@ -1000,11 +1566,15 @@ app.delete(
             coupleId,
             categoryId,
           ]),
+          client.query('SELECT 1 FROM recurring_rules WHERE couple_id = $1 AND category_id = $2 LIMIT 1', [
+            coupleId,
+            categoryId,
+          ]),
         ]);
-        if (txRef.rowCount > 0 || bdgRef.rowCount > 0 || noteRef.rowCount > 0) {
+        if (txRef.rowCount > 0 || bdgRef.rowCount > 0 || noteRef.rowCount > 0 || recRef.rowCount > 0) {
           throw new HttpError(
             409,
-            'Kategori tidak dapat dihapus karena masih digunakan oleh transaksi, anggaran, atau catatan.'
+            'Kategori tidak dapat dihapus karena masih digunakan oleh transaksi, anggaran, catatan, atau tagihan rutin.'
           );
         }
 
@@ -1022,14 +1592,18 @@ app.delete(
     const usedInTx = (mem.transactions.get(coupleId) || []).some((t) => t.categoryId === categoryId);
     const usedInBudget = (mem.budgets.get(coupleId) || []).some((b) => b.categoryId === categoryId);
     const usedInNotes = (mem.notes.get(coupleId) || []).some((n) => n.categoryId === categoryId);
-    if (usedInTx || usedInBudget || usedInNotes) {
+    const usedInRecurring = (mem.recurringRules.get(coupleId) || []).some((r) => r.categoryId === categoryId);
+    if (usedInTx || usedInBudget || usedInNotes || usedInRecurring) {
       throw new HttpError(
         409,
-        'Kategori tidak dapat dihapus karena masih digunakan oleh transaksi, anggaran, atau catatan.'
+        'Kategori tidak dapat dihapus karena masih digunakan oleh transaksi, anggaran, catatan, atau tagihan rutin.'
       );
     }
 
     list.splice(idx, 1);
+    for (const preset of mem.quickPresets.get(coupleId) || []) {
+      if (preset.categoryId === categoryId) preset.categoryId = null;
+    }
     res.json({ ok: true, id: categoryId });
   })
 );
@@ -1313,6 +1887,12 @@ app.delete(
     for (const tr of transfers) {
       if (tr.fromAccountId === accountId) tr.fromAccountId = null;
       if (tr.toAccountId === accountId) tr.toAccountId = null;
+    }
+    for (const rule of mem.recurringRules.get(coupleId) || []) {
+      if (rule.accountId === accountId) rule.accountId = null;
+    }
+    for (const preset of mem.quickPresets.get(coupleId) || []) {
+      if (preset.accountId === accountId) preset.accountId = null;
     }
     res.json({ ok: true, id: accountId });
   })
@@ -2439,42 +3019,7 @@ app.get(
       });
     }
 
-    let totalIncome = 0;
-    let totalExpense = 0;
-    const partnerMap = new Map(partners.map((p) => [p.id, { partnerId: p.id, partnerName: p.name, income: 0, expense: 0, net: 0 }]));
-    const catMap = new Map(
-      categories.map((c) => [
-        c.id,
-        { categoryId: c.id, categoryName: c.name, icon: c.icon, color: c.color, targetAmount: c.targetAmount, spent: 0, income: 0 },
-      ])
-    );
-
-    for (const tx of transactions) {
-      if (tx.type === 'income') totalIncome = roundMoney(totalIncome + tx.amount);
-      else totalExpense = roundMoney(totalExpense + tx.amount);
-
-      const pEntry = partnerMap.get(tx.partnerId);
-      if (pEntry) {
-        if (tx.type === 'income') pEntry.income = roundMoney(pEntry.income + tx.amount);
-        else pEntry.expense = roundMoney(pEntry.expense + tx.amount);
-        pEntry.net = roundMoney(pEntry.income - pEntry.expense);
-      }
-
-      const cEntry = catMap.get(tx.categoryId);
-      if (cEntry) {
-        if (tx.type === 'income') cEntry.income = roundMoney(cEntry.income + tx.amount);
-        else cEntry.spent = roundMoney(cEntry.spent + tx.amount);
-      }
-    }
-
-    const payload = {
-      totalIncome,
-      totalExpense,
-      netBalance: roundMoney(totalIncome - totalExpense),
-      byPartner: Array.from(partnerMap.values()),
-      byCategory: Array.from(catMap.values()),
-    };
-    if (monthStr) payload.month = monthStr;
+    const payload = buildSummaryPayload(monthStr, partners, categories, transactions);
     res.json(payload);
   })
 );
@@ -2528,104 +3073,7 @@ app.get(
       });
     }
 
-    let totalIncome = 0;
-    let totalExpense = 0;
-
-    const partnerMap = new Map(
-      partners.map((p) => [
-        p.id,
-        {
-          partnerId: p.id,
-          partnerName: p.name,
-          roleLabel: p.roleLabel,
-          avatarColor: p.avatarColor,
-          income: 0,
-          expense: 0,
-          net: 0,
-          transactionCount: 0,
-          incomePercent: 0,
-          expensePercent: 0,
-        },
-      ])
-    );
-
-    const catMap = new Map(
-      categories.map((c) => [
-        c.id,
-        {
-          categoryId: c.id,
-          categoryName: c.name,
-          icon: c.icon,
-          color: c.color,
-          targetAmount: roundMoney(c.targetAmount),
-          spent: 0,
-          expense: 0,
-          income: 0,
-          transactionCount: 0,
-          expensePercent: 0,
-          incomePercent: 0,
-        },
-      ])
-    );
-
-    for (const tx of transactions) {
-      const amt = roundMoney(tx.amount);
-      if (tx.type === 'income') totalIncome = roundMoney(totalIncome + amt);
-      else totalExpense = roundMoney(totalExpense + amt);
-
-      const pEntry = partnerMap.get(tx.partnerId);
-      if (pEntry) {
-        pEntry.transactionCount += 1;
-        if (tx.type === 'income') pEntry.income = roundMoney(pEntry.income + amt);
-        else pEntry.expense = roundMoney(pEntry.expense + amt);
-        pEntry.net = roundMoney(pEntry.income - pEntry.expense);
-      }
-
-      const cEntry = catMap.get(tx.categoryId);
-      if (cEntry) {
-        cEntry.transactionCount += 1;
-        if (tx.type === 'income') {
-          cEntry.income = roundMoney(cEntry.income + amt);
-        } else {
-          cEntry.expense = roundMoney(cEntry.expense + amt);
-          cEntry.spent = cEntry.expense;
-        }
-      }
-    }
-
-    const netBalance = roundMoney(totalIncome - totalExpense);
-    const savingsRate = totalIncome > 0 ? Math.round((netBalance / totalIncome) * 1000) / 10 : 0;
-
-    const byPartner = Array.from(partnerMap.values()).map((p) => ({
-      ...p,
-      incomePercent: totalIncome > 0 ? Math.round((p.income / totalIncome) * 1000) / 10 : 0,
-      expensePercent: totalExpense > 0 ? Math.round((p.expense / totalExpense) * 1000) / 10 : 0,
-    }));
-
-    const byCategory = Array.from(catMap.values())
-      .map((c) => ({
-        ...c,
-        expensePercent: totalExpense > 0 ? Math.round((c.expense / totalExpense) * 1000) / 10 : 0,
-        incomePercent: totalIncome > 0 ? Math.round((c.income / totalIncome) * 1000) / 10 : 0,
-      }))
-      .sort((a, b) => b.expense - a.expense || b.income - a.income || a.categoryName.localeCompare(b.categoryName));
-
-    res.json({
-      month: monthStr,
-      totals: {
-        totalIncome,
-        totalExpense,
-        netBalance,
-        savingsRate,
-        transactionCount: transactions.length,
-      },
-      byCategory,
-      byPartner,
-      accountsOverview: {
-        ...computeAccountTotals(accounts),
-        accountsCount: accounts.length,
-      },
-    });
+    res.json(buildAnalyticsPayload(monthStr, partners, categories, accounts, transactions));
   })
 );
 
@@ -2837,6 +3285,1080 @@ app.get(
   })
 );
 
+const RECURRING_SELECT_SQL = `
+  SELECT r.id, r.couple_id AS "coupleId", r.title, r.type, r.amount::float8 AS amount,
+         r.category_id AS "categoryId", c.name AS "categoryName", c.icon AS "categoryIcon",
+         r.account_id AS "accountId", a.name AS "accountName", a.icon AS "accountIcon",
+         r.frequency, r.next_due_date AS "nextDueDate", r.active,
+         r.created_by AS "createdBy", p.name AS "createdByName", r.created_at AS "createdAt"
+  FROM recurring_rules r
+  JOIN categories c ON c.id = r.category_id
+  LEFT JOIN accounts a ON a.id = r.account_id
+  JOIN partners p ON p.id = r.created_by
+`;
+
+const DEBT_SELECT_SQL = `
+  SELECT d.id, d.couple_id AS "coupleId", d.person_name AS "personName", d.direction,
+         d.amount::float8 AS amount, d.paid_amount::float8 AS "paidAmount",
+         d.note, d.due_date AS "dueDate", d.settled,
+         d.created_by AS "createdBy", p.name AS "createdByName", d.created_at AS "createdAt"
+  FROM debt_loans d
+  JOIN partners p ON p.id = d.created_by
+`;
+
+const PRESET_SELECT_SQL = `
+  SELECT q.id, q.couple_id AS "coupleId", q.label, q.type, q.amount::float8 AS amount,
+         q.category_id AS "categoryId", c.name AS "categoryName", c.icon AS "categoryIcon",
+         q.account_id AS "accountId", a.name AS "accountName", a.icon AS "accountIcon",
+         q.note, q.created_at AS "createdAt"
+  FROM quick_presets q
+  LEFT JOIN categories c ON c.id = q.category_id
+  LEFT JOIN accounts a ON a.id = q.account_id
+`;
+
+function mapPgDebtRow(row) {
+  const amount = roundMoney(row.amount);
+  const paidAmount = roundMoney(row.paidAmount);
+  return {
+    ...row,
+    amount,
+    paidAmount,
+    remainingAmount: roundMoney(Math.max(0, amount - paidAmount)),
+    dueDate: row.dueDate ?? null,
+    settled: Boolean(row.settled),
+  };
+}
+
+// ============================================================================
+// Bootstrap (Consolidated Domain Payload for Couple Space)
+// ============================================================================
+app.get(
+  '/api/bootstrap',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const tz = parseTzOffset(req.query.tzOffset);
+    const monthStr = validateMonth(req.query.month, { required: true, defaultTzOffset: tz });
+    const bounds = getMonthBounds(monthStr, tz);
+
+    if (pool) {
+      const [
+        cRes,
+        pRes,
+        catRes,
+        accRes,
+        trRes,
+        txRes,
+        bdgRes,
+        noteRes,
+        recRes,
+        debtRes,
+        presetRes,
+      ] = await Promise.all([
+        pool.query('SELECT id, couple_name AS "coupleName", invite_code AS "inviteCode" FROM couples WHERE id = $1', [
+          coupleId,
+        ]),
+        pool.query(
+          'SELECT id, couple_id AS "coupleId", name, role_label AS "roleLabel", avatar_color AS "avatarColor" FROM partners WHERE couple_id = $1 ORDER BY created_at ASC',
+          [coupleId]
+        ),
+        pool.query(
+          'SELECT id, couple_id AS "coupleId", name, icon, color, target_amount::float8 AS "targetAmount", is_default AS "isDefault" FROM categories WHERE couple_id = $1 ORDER BY is_default DESC, created_at ASC',
+          [coupleId]
+        ),
+        pool.query(
+          `SELECT a.id, a.couple_id AS "coupleId", a.owner_partner_id AS "ownerPartnerId",
+                  p.name AS "ownerPartnerName", a.name, a.account_type AS "accountType",
+                  a.is_shared AS "isShared", a.initial_balance::float8 AS "initialBalance",
+                  a.balance::float8 AS balance, a.icon, a.color, a.created_at AS "createdAt"
+           FROM accounts a
+           LEFT JOIN partners p ON p.id = a.owner_partner_id
+           WHERE a.couple_id = $1
+           ORDER BY a.is_shared DESC, a.created_at ASC`,
+          [coupleId]
+        ),
+        pool.query(
+          `SELECT t.id, t.couple_id AS "coupleId", t.partner_id AS "partnerId", p.name AS "partnerName",
+                  t.from_account_id AS "fromAccountId", fa.name AS "fromAccountName", fa.icon AS "fromAccountIcon",
+                  t.to_account_id AS "toAccountId", ta.name AS "toAccountName", ta.icon AS "toAccountIcon",
+                  t.amount::float8 AS amount, t.note, t.occurred_at AS "occurredAt", t.created_at AS "createdAt"
+           FROM account_transfers t
+           JOIN partners p ON p.id = t.partner_id
+           LEFT JOIN accounts fa ON fa.id = t.from_account_id
+           LEFT JOIN accounts ta ON ta.id = t.to_account_id
+           WHERE t.couple_id = $1 AND t.occurred_at >= $2 AND t.occurred_at < $3
+           ORDER BY t.occurred_at DESC, t.created_at DESC`,
+          [coupleId, bounds.startIso, bounds.endIso]
+        ),
+        pool.query(
+          `SELECT t.id, t.couple_id AS "coupleId", t.partner_id AS "partnerId", p.name AS "partnerName",
+                  t.category_id AS "categoryId", c.name AS "categoryName", c.icon AS "categoryIcon",
+                  t.account_id AS "accountId", a.name AS "accountName", a.icon AS "accountIcon",
+                  t.type, t.amount::float8 AS amount, t.note, t.occurred_at AS "occurredAt"
+           FROM transactions t
+           JOIN partners p ON p.id = t.partner_id
+           JOIN categories c ON c.id = t.category_id
+           LEFT JOIN accounts a ON a.id = t.account_id
+           WHERE t.couple_id = $1 AND t.occurred_at >= $2 AND t.occurred_at < $3
+           ORDER BY t.occurred_at DESC, t.created_at DESC`,
+          [coupleId, bounds.startIso, bounds.endIso]
+        ),
+        pool.query(
+          `SELECT b.id, b.couple_id AS "coupleId", b.category_id AS "categoryId",
+                  c.name AS "categoryName", c.icon AS "categoryIcon", c.color AS "categoryColor",
+                  b.month, b.limit_amount::float8 AS "limitAmount"
+           FROM budgets b
+           JOIN categories c ON c.id = b.category_id
+           WHERE b.couple_id = $1 AND b.month = $2
+           ORDER BY c.name ASC`,
+          [coupleId, monthStr]
+        ),
+        pool.query(
+          `SELECT n.id, n.couple_id AS "coupleId", n.author_partner_id AS "authorPartnerId", p.name AS "authorName",
+                  n.category_id AS "categoryId", n.title, n.content, n.is_pinned AS "isPinned", n.updated_at AS "updatedAt"
+           FROM shared_notes n JOIN partners p ON p.id = n.author_partner_id
+           WHERE n.couple_id = $1 ORDER BY n.is_pinned DESC, n.updated_at DESC`,
+          [coupleId]
+        ),
+        pool.query(`${RECURRING_SELECT_SQL} WHERE r.couple_id = $1 ORDER BY r.next_due_date ASC, r.created_at ASC`, [
+          coupleId,
+        ]),
+        pool.query(`${DEBT_SELECT_SQL} WHERE d.couple_id = $1 ORDER BY d.settled ASC, d.created_at DESC`, [coupleId]),
+        pool.query(`${PRESET_SELECT_SQL} WHERE q.couple_id = $1 ORDER BY q.created_at ASC`, [coupleId]),
+      ]);
+
+      const partners = pRes.rows;
+      const categories = catRes.rows;
+      const accounts = accRes.rows;
+      const transactions = txRes.rows;
+      const spentMap = new Map();
+      for (const tx of transactions) {
+        if (tx.type === 'expense') {
+          spentMap.set(tx.categoryId, roundMoney((spentMap.get(tx.categoryId) || 0) + roundMoney(tx.amount)));
+        }
+      }
+      const budgets = bdgRes.rows.map((row) => buildMonthlyBudget(row, spentMap.get(row.categoryId) || 0));
+      const totalLimit = roundMoney(budgets.reduce((s, b) => s + b.limitAmount, 0));
+      const totalSpent = roundMoney(budgets.reduce((s, b) => s + b.spent, 0));
+
+      return res.json({
+        month: monthStr,
+        couple: { ...cRes.rows[0], partners },
+        categories,
+        accounts,
+        accountTotals: computeAccountTotals(accounts),
+        transfers: trRes.rows,
+        transactions,
+        budgets,
+        budgetTotals: {
+          month: monthStr,
+          totalLimit,
+          totalSpent,
+          totalRemaining: roundMoney(totalLimit - totalSpent),
+        },
+        summary: buildSummaryPayload(monthStr, partners, categories, transactions),
+        analytics: buildAnalyticsPayload(monthStr, partners, categories, accounts, transactions),
+        notes: noteRes.rows,
+        recurringRules: recRes.rows,
+        debtLoans: debtRes.rows.map(mapPgDebtRow),
+        quickPresets: presetRes.rows,
+      });
+    }
+
+    const memCouple = mem.couples.get(coupleId);
+    const partnersRaw = Array.from(mem.partners.values())
+      .filter((p) => p.coupleId === coupleId)
+      .sort((a, b) => a.createdAtMs - b.createdAtMs);
+    const partners = partnersRaw.map(({ id, coupleId: cId, name, roleLabel, avatarColor }) => ({
+      id,
+      coupleId: cId,
+      name,
+      roleLabel,
+      avatarColor,
+    }));
+    const categories = (mem.categories.get(coupleId) || []).map(
+      ({ id, coupleId: cId, name, icon, color, targetAmount, isDefault }) => ({
+        id,
+        coupleId: cId,
+        name,
+        icon,
+        color,
+        targetAmount,
+        isDefault,
+      })
+    );
+    const accounts = [...(mem.accounts.get(coupleId) || [])]
+      .sort((a, b) => Number(b.isShared) - Number(a.isShared) || a.createdAtMs - b.createdAtMs)
+      .map(hydrateMemAccount);
+    const transfers = [...(mem.transfers.get(coupleId) || [])]
+      .filter((tr) => {
+        const ms = new Date(tr.occurredAt).getTime();
+        return ms >= bounds.startMs && ms < bounds.endMs;
+      })
+      .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime() || b.createdAtMs - a.createdAtMs)
+      .map((tr) => hydrateMemTransfer(tr, coupleId));
+    const transactions = [...(mem.transactions.get(coupleId) || [])]
+      .filter((tx) => {
+        const ms = new Date(tx.occurredAt).getTime();
+        return ms >= bounds.startMs && ms < bounds.endMs;
+      })
+      .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime() || b.createdAtMs - a.createdAtMs)
+      .map((tx) => hydrateMemTx(tx, coupleId));
+
+    const catById = new Map(categories.map((c) => [c.id, c]));
+    const spentMap = new Map();
+    for (const tx of transactions) {
+      if (tx.type === 'expense') {
+        spentMap.set(tx.categoryId, roundMoney((spentMap.get(tx.categoryId) || 0) + tx.amount));
+      }
+    }
+    const budgets = (mem.budgets.get(coupleId) || [])
+      .filter((b) => b.month === monthStr)
+      .map((b) => {
+        const cat = catById.get(b.categoryId);
+        return buildMonthlyBudget(
+          {
+            id: b.id,
+            coupleId: b.coupleId,
+            categoryId: b.categoryId,
+            categoryName: cat ? cat.name : '',
+            categoryIcon: cat ? cat.icon : '✨',
+            categoryColor: cat ? cat.color : DEFAULT_CATEGORY_COLOR,
+            month: b.month,
+            limitAmount: b.limitAmount,
+          },
+          spentMap.get(b.categoryId) || 0
+        );
+      })
+      .sort((a, b) => a.categoryName.localeCompare(b.categoryName));
+    const totalLimit = roundMoney(budgets.reduce((s, b) => s + b.limitAmount, 0));
+    const totalSpent = roundMoney(budgets.reduce((s, b) => s + b.spent, 0));
+
+    const notes = [...(mem.notes.get(coupleId) || [])]
+      .sort(
+        (a, b) => Number(b.isPinned) - Number(a.isPinned) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      )
+      .map(hydrateMemNote);
+
+    const recurringRules = [...(mem.recurringRules.get(coupleId) || [])]
+      .sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate) || a.createdAtMs - b.createdAtMs)
+      .map((r) => hydrateMemRecurringRule(r, coupleId));
+
+    const debtLoans = [...(mem.debtLoans.get(coupleId) || [])]
+      .sort((a, b) => Number(a.settled) - Number(b.settled) || b.createdAtMs - a.createdAtMs)
+      .map(hydrateMemDebtLoan);
+
+    const quickPresets = [...(mem.quickPresets.get(coupleId) || [])]
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+      .map((p) => hydrateMemQuickPreset(p, coupleId));
+
+    res.json({
+      month: monthStr,
+      couple: { ...memCouple, partners },
+      categories,
+      accounts,
+      accountTotals: computeAccountTotals(accounts),
+      transfers,
+      transactions,
+      budgets,
+      budgetTotals: {
+        month: monthStr,
+        totalLimit,
+        totalSpent,
+        totalRemaining: roundMoney(totalLimit - totalSpent),
+      },
+      summary: buildSummaryPayload(monthStr, partners, categories, transactions),
+      analytics: buildAnalyticsPayload(monthStr, partners, categories, accounts, transactions),
+      notes,
+      recurringRules,
+      debtLoans,
+      quickPresets,
+    });
+  })
+);
+
+// ============================================================================
+// Recurring Bills & Transactions
+// ============================================================================
+app.get(
+  '/api/recurring',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    if (pool) {
+      const r = await pool.query(
+        `${RECURRING_SELECT_SQL} WHERE r.couple_id = $1 ORDER BY r.next_due_date ASC, r.created_at ASC`,
+        [coupleId]
+      );
+      return res.json(r.rows);
+    }
+    const rules = [...(mem.recurringRules.get(coupleId) || [])]
+      .sort((a, b) => a.nextDueDate.localeCompare(b.nextDueDate) || a.createdAtMs - b.createdAtMs)
+      .map((r) => hydrateMemRecurringRule(r, coupleId));
+    res.json(rules);
+  })
+);
+
+app.post(
+  '/api/recurring',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId, id: createdBy, name: createdByName } = req.partner;
+    const body = req.body || {};
+
+    const cleanTitle = parseRequiredText(body.title, 'Judul tagihan rutin wajib diisi.');
+    if (!['income', 'expense'].includes(body.type)) {
+      throw new HttpError(400, 'Tipe transaksi tagihan rutin harus income atau expense.');
+    }
+    const numericAmount = parseStrictNumber(body.amount, 'Nominal tagihan rutin harus lebih dari 0.', {
+      exclusiveMin: 0,
+    });
+    const rawCategoryId = body.categoryId !== undefined ? body.categoryId : body.category_id;
+    const cleanCategoryId = assertUuid(rawCategoryId, 'categoryId');
+    const rawAccountId = body.accountId !== undefined ? body.accountId : body.account_id;
+    const cleanAccountId =
+      rawAccountId === undefined || rawAccountId === null || rawAccountId === ''
+        ? null
+        : assertUuid(rawAccountId, 'accountId');
+    if (!RECURRING_FREQUENCIES.includes(body.frequency)) {
+      throw new HttpError(400, 'Frekuensi harus weekly, monthly, atau yearly.');
+    }
+    const rawNextDue = body.nextDueDate !== undefined ? body.nextDueDate : body.next_due_date;
+    const cleanNextDueDate = parseDateYmd(rawNextDue, 'Format tanggal jatuh tempo harus YYYY-MM-DD.', {
+      allowUndefined: true,
+    });
+    if (body.active !== undefined && typeof body.active !== 'boolean') {
+      throw new HttpError(400, 'Status active harus berupa boolean.');
+    }
+    const isActive = body.active === undefined ? true : body.active;
+    const id = randomUUID();
+    const createdAtIso = new Date().toISOString();
+
+    if (pool) {
+      const rule = await withPgTx(async (client) => {
+        const cRes = await client.query('SELECT id FROM categories WHERE id = $1 AND couple_id = $2', [
+          cleanCategoryId,
+          coupleId,
+        ]);
+        if (!cRes.rowCount) {
+          throw new HttpError(404, 'Kategori tidak ditemukan.');
+        }
+        if (cleanAccountId) {
+          const aRes = await client.query('SELECT id FROM accounts WHERE id = $1 AND couple_id = $2', [
+            cleanAccountId,
+            coupleId,
+          ]);
+          if (!aRes.rowCount) {
+            throw new HttpError(404, 'Akun tidak ditemukan.');
+          }
+        }
+        await client.query(
+          `INSERT INTO recurring_rules(id, couple_id, title, type, amount, category_id, account_id, frequency, next_due_date, active, created_by, created_at)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [
+            id,
+            coupleId,
+            cleanTitle,
+            body.type,
+            numericAmount,
+            cleanCategoryId,
+            cleanAccountId,
+            body.frequency,
+            cleanNextDueDate,
+            isActive,
+            createdBy,
+            createdAtIso,
+          ]
+        );
+        const joined = await client.query(`${RECURRING_SELECT_SQL} WHERE r.id = $1 AND r.couple_id = $2`, [
+          id,
+          coupleId,
+        ]);
+        return joined.rows[0];
+      });
+      return res.status(201).json(rule);
+    }
+
+    const cat = (mem.categories.get(coupleId) || []).find((c) => c.id === cleanCategoryId);
+    if (!cat) throw new HttpError(404, 'Kategori tidak ditemukan.');
+    if (cleanAccountId) {
+      const acc = (mem.accounts.get(coupleId) || []).find((a) => a.id === cleanAccountId);
+      if (!acc) throw new HttpError(404, 'Akun tidak ditemukan.');
+    }
+
+    if (!mem.recurringRules.has(coupleId)) mem.recurringRules.set(coupleId, []);
+    const ruleObj = {
+      id,
+      coupleId,
+      title: cleanTitle,
+      type: body.type,
+      amount: numericAmount,
+      categoryId: cleanCategoryId,
+      categoryName: cat.name,
+      categoryIcon: cat.icon,
+      accountId: cleanAccountId,
+      frequency: body.frequency,
+      nextDueDate: cleanNextDueDate,
+      active: isActive,
+      createdBy,
+      createdByName,
+      createdAt: createdAtIso,
+      createdAtMs: Date.now(),
+    };
+    mem.recurringRules.get(coupleId).push(ruleObj);
+    res.status(201).json(hydrateMemRecurringRule(ruleObj, coupleId));
+  })
+);
+
+app.patch(
+  '/api/recurring/:id',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const ruleId = assertUuid(req.params.id, 'recurringRuleId');
+    const body = req.body || {};
+
+    let nextTitle;
+    if (body.title !== undefined) {
+      nextTitle = parseRequiredText(body.title, 'Judul tagihan rutin wajib diisi.');
+    }
+    if (body.type !== undefined && !['income', 'expense'].includes(body.type)) {
+      throw new HttpError(400, 'Tipe transaksi tagihan rutin harus income atau expense.');
+    }
+    let nextAmount;
+    if (body.amount !== undefined) {
+      nextAmount = parseStrictNumber(body.amount, 'Nominal tagihan rutin harus lebih dari 0.', {
+        exclusiveMin: 0,
+      });
+    }
+    let nextCategoryId;
+    const hasCategory = body.categoryId !== undefined || body.category_id !== undefined;
+    if (hasCategory) {
+      nextCategoryId = assertUuid(body.categoryId !== undefined ? body.categoryId : body.category_id, 'categoryId');
+    }
+    const hasAccount = 'accountId' in body || 'account_id' in body;
+    let nextAccountId;
+    if (hasAccount) {
+      const rawAcc = 'accountId' in body ? body.accountId : body.account_id;
+      nextAccountId = rawAcc === null || rawAcc === '' || rawAcc === undefined ? null : assertUuid(rawAcc, 'accountId');
+    }
+    if (body.frequency !== undefined && !RECURRING_FREQUENCIES.includes(body.frequency)) {
+      throw new HttpError(400, 'Frekuensi harus weekly, monthly, atau yearly.');
+    }
+    const hasNextDue = body.nextDueDate !== undefined || body.next_due_date !== undefined;
+    let nextDueDate;
+    if (hasNextDue) {
+      nextDueDate = parseDateYmd(
+        body.nextDueDate !== undefined ? body.nextDueDate : body.next_due_date,
+        'Format tanggal jatuh tempo harus YYYY-MM-DD.'
+      );
+    }
+    if (body.active !== undefined && typeof body.active !== 'boolean') {
+      throw new HttpError(400, 'Status active harus berupa boolean.');
+    }
+    const isEmptyPatch = Object.keys(body).length === 0;
+
+    if (pool) {
+      const updated = await withPgTx(async (client) => {
+        const curRes = await client.query(
+          `SELECT id, title, type, amount::float8 AS amount, category_id AS "categoryId",
+                  account_id AS "accountId", frequency, next_due_date AS "nextDueDate", active
+           FROM recurring_rules WHERE id = $1 AND couple_id = $2 FOR UPDATE`,
+          [ruleId, coupleId]
+        );
+        if (!curRes.rowCount) {
+          throw new HttpError(404, 'Aturan tagihan rutin tidak ditemukan.');
+        }
+        const cur = curRes.rows[0];
+        const finalCategoryId = hasCategory ? nextCategoryId : cur.categoryId;
+        const finalAccountId = hasAccount ? nextAccountId : cur.accountId;
+
+        if (hasCategory && finalCategoryId !== cur.categoryId) {
+          const cRes = await client.query('SELECT id FROM categories WHERE id = $1 AND couple_id = $2', [
+            finalCategoryId,
+            coupleId,
+          ]);
+          if (!cRes.rowCount) throw new HttpError(404, 'Kategori tidak ditemukan.');
+        }
+        if (hasAccount && finalAccountId && finalAccountId !== cur.accountId) {
+          const aRes = await client.query('SELECT id FROM accounts WHERE id = $1 AND couple_id = $2', [
+            finalAccountId,
+            coupleId,
+          ]);
+          if (!aRes.rowCount) throw new HttpError(404, 'Akun tidak ditemukan.');
+        }
+
+        const finalActive = isEmptyPatch
+          ? !cur.active
+          : body.active !== undefined
+            ? body.active
+            : cur.active;
+
+        await client.query(
+          `UPDATE recurring_rules
+           SET title = $1, type = $2, amount = $3, category_id = $4, account_id = $5,
+               frequency = $6, next_due_date = $7, active = $8
+           WHERE id = $9 AND couple_id = $10`,
+          [
+            nextTitle !== undefined ? nextTitle : cur.title,
+            body.type !== undefined ? body.type : cur.type,
+            nextAmount !== undefined ? nextAmount : roundMoney(cur.amount),
+            finalCategoryId,
+            finalAccountId,
+            body.frequency !== undefined ? body.frequency : cur.frequency,
+            hasNextDue ? nextDueDate : cur.nextDueDate,
+            finalActive,
+            ruleId,
+            coupleId,
+          ]
+        );
+        const joined = await client.query(`${RECURRING_SELECT_SQL} WHERE r.id = $1 AND r.couple_id = $2`, [
+          ruleId,
+          coupleId,
+        ]);
+        return joined.rows[0];
+      });
+      return res.json(updated);
+    }
+
+    const list = mem.recurringRules.get(coupleId) || [];
+    const rule = list.find((r) => r.id === ruleId);
+    if (!rule) throw new HttpError(404, 'Aturan tagihan rutin tidak ditemukan.');
+
+    if (hasCategory) {
+      const cat = (mem.categories.get(coupleId) || []).find((c) => c.id === nextCategoryId);
+      if (!cat) throw new HttpError(404, 'Kategori tidak ditemukan.');
+      rule.categoryId = nextCategoryId;
+      rule.categoryName = cat.name;
+      rule.categoryIcon = cat.icon;
+    }
+    if (hasAccount) {
+      if (nextAccountId) {
+        const acc = (mem.accounts.get(coupleId) || []).find((a) => a.id === nextAccountId);
+        if (!acc) throw new HttpError(404, 'Akun tidak ditemukan.');
+      }
+      rule.accountId = nextAccountId;
+    }
+    if (nextTitle !== undefined) rule.title = nextTitle;
+    if (body.type !== undefined) rule.type = body.type;
+    if (nextAmount !== undefined) rule.amount = nextAmount;
+    if (body.frequency !== undefined) rule.frequency = body.frequency;
+    if (hasNextDue) rule.nextDueDate = nextDueDate;
+    if (isEmptyPatch) rule.active = !rule.active;
+    else if (body.active !== undefined) rule.active = body.active;
+
+    res.json(hydrateMemRecurringRule(rule, coupleId));
+  })
+);
+
+app.delete(
+  '/api/recurring/:id',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const ruleId = assertUuid(req.params.id, 'recurringRuleId');
+
+    if (pool) {
+      const del = await pool.query('DELETE FROM recurring_rules WHERE id = $1 AND couple_id = $2 RETURNING id', [
+        ruleId,
+        coupleId,
+      ]);
+      if (!del.rowCount) throw new HttpError(404, 'Aturan tagihan rutin tidak ditemukan.');
+      return res.json({ ok: true, id: ruleId });
+    }
+
+    const list = mem.recurringRules.get(coupleId) || [];
+    const idx = list.findIndex((r) => r.id === ruleId);
+    if (idx < 0) throw new HttpError(404, 'Aturan tagihan rutin tidak ditemukan.');
+    list.splice(idx, 1);
+    res.json({ ok: true, id: ruleId });
+  })
+);
+
+app.post(
+  '/api/recurring/:id/pay',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId, id: partnerId, name: partnerName } = req.partner;
+    const ruleId = assertUuid(req.params.id, 'recurringRuleId');
+    const body = req.body || {};
+
+    const hasOccurredAt = body.occurredAt !== undefined;
+    const hasDate = body.date !== undefined;
+    const rawDate = hasOccurredAt ? body.occurredAt : body.date;
+    const isoDate = parseOccurredAt(rawDate, { allowUndefined: !hasOccurredAt && !hasDate });
+
+    const hasAccountOverride = 'accountId' in body && body.accountId !== undefined;
+    const overrideAccountId = hasAccountOverride
+      ? body.accountId === null || body.accountId === ''
+        ? null
+        : assertUuid(body.accountId, 'accountId')
+      : undefined;
+    const overrideAmount =
+      body.amount !== undefined
+        ? parseStrictNumber(body.amount, 'Nominal pembayaran harus lebih dari 0.', { exclusiveMin: 0 })
+        : undefined;
+
+    const txId = randomUUID();
+
+    if (pool) {
+      const result = await withPgTx(async (client) => {
+        const ruleRes = await client.query(
+          `SELECT r.id, r.couple_id AS "coupleId", r.title, r.type, r.amount::float8 AS amount,
+                  r.category_id AS "categoryId", c.name AS "categoryName", c.icon AS "categoryIcon",
+                  r.account_id AS "accountId", r.frequency, r.next_due_date AS "nextDueDate",
+                  r.active, r.created_by AS "createdBy"
+           FROM recurring_rules r
+           JOIN categories c ON c.id = r.category_id
+           WHERE r.id = $1 AND r.couple_id = $2
+           FOR UPDATE OF r`,
+          [ruleId, coupleId]
+        );
+        if (!ruleRes.rowCount) {
+          throw new HttpError(404, 'Aturan tagihan rutin tidak ditemukan.');
+        }
+        const rule = ruleRes.rows[0];
+        const effectiveAccountId = hasAccountOverride ? overrideAccountId : rule.accountId;
+        const effectiveAmount = overrideAmount !== undefined ? overrideAmount : roundMoney(rule.amount);
+        const effectiveNote = body.note !== undefined ? String(body.note ?? '') : rule.title;
+
+        let acc = null;
+        if (effectiveAccountId) {
+          const accRes = await client.query(
+            'SELECT id, name, icon FROM accounts WHERE id = $1 AND couple_id = $2 FOR UPDATE',
+            [effectiveAccountId, coupleId]
+          );
+          if (!accRes.rowCount) {
+            throw new HttpError(404, 'Akun tidak ditemukan.');
+          }
+          acc = accRes.rows[0];
+          await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2 AND couple_id = $3', [
+            signedDelta(rule.type, effectiveAmount),
+            effectiveAccountId,
+            coupleId,
+          ]);
+        }
+
+        await client.query(
+          `INSERT INTO transactions(id, couple_id, partner_id, category_id, account_id, type, amount, note, occurred_at)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            txId,
+            coupleId,
+            partnerId,
+            rule.categoryId,
+            effectiveAccountId,
+            rule.type,
+            effectiveAmount,
+            effectiveNote,
+            isoDate,
+          ]
+        );
+
+        const advancedDue = advanceDueDate(rule.nextDueDate, rule.frequency);
+        await client.query('UPDATE recurring_rules SET next_due_date = $1 WHERE id = $2 AND couple_id = $3', [
+          advancedDue,
+          ruleId,
+          coupleId,
+        ]);
+
+        const updatedRuleRes = await client.query(`${RECURRING_SELECT_SQL} WHERE r.id = $1 AND r.couple_id = $2`, [
+          ruleId,
+          coupleId,
+        ]);
+
+        return {
+          transaction: {
+            id: txId,
+            coupleId,
+            partnerId,
+            partnerName,
+            categoryId: rule.categoryId,
+            categoryName: rule.categoryName,
+            categoryIcon: rule.categoryIcon,
+            accountId: acc ? acc.id : null,
+            accountName: acc ? acc.name : null,
+            accountIcon: acc ? acc.icon : null,
+            type: rule.type,
+            amount: effectiveAmount,
+            note: effectiveNote,
+            occurredAt: isoDate,
+          },
+          rule: updatedRuleRes.rows[0],
+        };
+      });
+      return res.status(201).json(result);
+    }
+
+    const rules = mem.recurringRules.get(coupleId) || [];
+    const rule = rules.find((r) => r.id === ruleId);
+    if (!rule) throw new HttpError(404, 'Aturan tagihan rutin tidak ditemukan.');
+
+    const cat = (mem.categories.get(coupleId) || []).find((c) => c.id === rule.categoryId);
+    if (!cat) throw new HttpError(404, 'Kategori tidak ditemukan.');
+
+    const effectiveAccountId = hasAccountOverride ? overrideAccountId : rule.accountId;
+    const effectiveAmount = overrideAmount !== undefined ? overrideAmount : roundMoney(rule.amount);
+    const effectiveNote = body.note !== undefined ? String(body.note ?? '') : rule.title;
+
+    let acc = null;
+    if (effectiveAccountId) {
+      acc = (mem.accounts.get(coupleId) || []).find((a) => a.id === effectiveAccountId);
+      if (!acc) throw new HttpError(404, 'Akun tidak ditemukan.');
+    }
+
+    if (acc) {
+      acc.balance = roundMoney(acc.balance + signedDelta(rule.type, effectiveAmount));
+    }
+
+    if (!mem.transactions.has(coupleId)) mem.transactions.set(coupleId, []);
+    const tx = {
+      id: txId,
+      coupleId,
+      partnerId,
+      partnerName,
+      categoryId: rule.categoryId,
+      categoryName: cat.name,
+      categoryIcon: cat.icon,
+      accountId: effectiveAccountId,
+      type: rule.type,
+      amount: effectiveAmount,
+      note: effectiveNote,
+      occurredAt: isoDate,
+      createdAtMs: Date.now(),
+    };
+    mem.transactions.get(coupleId).push(tx);
+
+    rule.nextDueDate = advanceDueDate(rule.nextDueDate, rule.frequency);
+
+    res.status(201).json({
+      transaction: hydrateMemTx(tx, coupleId),
+      rule: hydrateMemRecurringRule(rule, coupleId),
+    });
+  })
+);
+
+// ============================================================================
+// Debt / Loan & Split Tracking
+// ============================================================================
+app.get(
+  '/api/debts',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    if (pool) {
+      const r = await pool.query(`${DEBT_SELECT_SQL} WHERE d.couple_id = $1 ORDER BY d.settled ASC, d.created_at DESC`, [
+        coupleId,
+      ]);
+      return res.json(r.rows.map(mapPgDebtRow));
+    }
+    const debts = [...(mem.debtLoans.get(coupleId) || [])]
+      .sort((a, b) => Number(a.settled) - Number(b.settled) || b.createdAtMs - a.createdAtMs)
+      .map(hydrateMemDebtLoan);
+    res.json(debts);
+  })
+);
+
+app.post(
+  '/api/debts',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId, id: createdBy, name: createdByName } = req.partner;
+    const body = req.body || {};
+
+    const rawPerson = body.personName !== undefined ? body.personName : body.person_name;
+    const cleanPersonName = parseRequiredText(rawPerson, 'Nama orang/pihak wajib diisi.');
+    if (!DEBT_DIRECTIONS.includes(body.direction)) {
+      throw new HttpError(400, 'Direction harus payable atau receivable.');
+    }
+    const numericAmount = parseStrictNumber(body.amount, 'Nominal hutang/piutang harus lebih dari 0.', {
+      exclusiveMin: 0,
+    });
+    const rawDue = body.dueDate !== undefined ? body.dueDate : body.due_date;
+    const cleanDueDate =
+      rawDue === undefined || rawDue === null || rawDue === ''
+        ? null
+        : parseDateYmd(rawDue, 'Format tanggal jatuh tempo harus YYYY-MM-DD.');
+    const cleanNote = String(body.note ?? '');
+    const id = randomUUID();
+    const createdAtIso = new Date().toISOString();
+
+    if (pool) {
+      await pool.query(
+        `INSERT INTO debt_loans(id, couple_id, person_name, direction, amount, paid_amount, note, due_date, settled, created_by, created_at)
+         VALUES($1,$2,$3,$4,$5,0,$6,$7,false,$8,$9)`,
+        [id, coupleId, cleanPersonName, body.direction, numericAmount, cleanNote, cleanDueDate, createdBy, createdAtIso]
+      );
+      const r = await pool.query(`${DEBT_SELECT_SQL} WHERE d.id = $1 AND d.couple_id = $2`, [id, coupleId]);
+      return res.status(201).json(mapPgDebtRow(r.rows[0]));
+    }
+
+    if (!mem.debtLoans.has(coupleId)) mem.debtLoans.set(coupleId, []);
+    const debtObj = {
+      id,
+      coupleId,
+      personName: cleanPersonName,
+      direction: body.direction,
+      amount: numericAmount,
+      paidAmount: 0,
+      note: cleanNote,
+      dueDate: cleanDueDate,
+      settled: false,
+      createdBy,
+      createdByName,
+      createdAt: createdAtIso,
+      createdAtMs: Date.now(),
+    };
+    mem.debtLoans.get(coupleId).push(debtObj);
+    res.status(201).json(hydrateMemDebtLoan(debtObj));
+  })
+);
+
+app.post(
+  '/api/debts/:id/settle',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const debtId = assertUuid(req.params.id, 'debtId');
+    const body = req.body || {};
+
+    const hasExplicitAmount = body.amount !== undefined && body.amount !== null;
+    const explicitAmount = hasExplicitAmount
+      ? parseStrictNumber(body.amount, 'Nominal pembayaran harus lebih dari 0.', { exclusiveMin: 0 })
+      : null;
+
+    if (pool) {
+      const updated = await withPgTx(async (client) => {
+        const curRes = await client.query(
+          `SELECT id, amount::float8 AS amount, paid_amount::float8 AS "paidAmount", settled
+           FROM debt_loans WHERE id = $1 AND couple_id = $2 FOR UPDATE`,
+          [debtId, coupleId]
+        );
+        if (!curRes.rowCount) {
+          throw new HttpError(404, 'Catatan hutang/piutang tidak ditemukan.');
+        }
+        const cur = curRes.rows[0];
+        const remaining = roundMoney(roundMoney(cur.amount) - roundMoney(cur.paidAmount));
+        if (cur.settled || remaining <= 0) {
+          throw new HttpError(400, 'Catatan hutang/piutang ini sudah lunas.');
+        }
+        const payAmount = hasExplicitAmount ? explicitAmount : remaining;
+        const nextPaid = roundMoney(roundMoney(cur.paidAmount) + payAmount);
+        const nextSettled = nextPaid >= roundMoney(cur.amount);
+
+        await client.query(
+          'UPDATE debt_loans SET paid_amount = $1, settled = $2 WHERE id = $3 AND couple_id = $4',
+          [nextPaid, nextSettled, debtId, coupleId]
+        );
+        const joined = await client.query(`${DEBT_SELECT_SQL} WHERE d.id = $1 AND d.couple_id = $2`, [
+          debtId,
+          coupleId,
+        ]);
+        return mapPgDebtRow(joined.rows[0]);
+      });
+      return res.json(updated);
+    }
+
+    const list = mem.debtLoans.get(coupleId) || [];
+    const debt = list.find((d) => d.id === debtId);
+    if (!debt) throw new HttpError(404, 'Catatan hutang/piutang tidak ditemukan.');
+
+    const remaining = roundMoney(roundMoney(debt.amount) - roundMoney(debt.paidAmount));
+    if (debt.settled || remaining <= 0) {
+      throw new HttpError(400, 'Catatan hutang/piutang ini sudah lunas.');
+    }
+    const payAmount = hasExplicitAmount ? explicitAmount : remaining;
+    debt.paidAmount = roundMoney(roundMoney(debt.paidAmount) + payAmount);
+    debt.settled = debt.paidAmount >= roundMoney(debt.amount);
+
+    res.json(hydrateMemDebtLoan(debt));
+  })
+);
+
+app.delete(
+  '/api/debts/:id',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const debtId = assertUuid(req.params.id, 'debtId');
+
+    if (pool) {
+      const del = await pool.query('DELETE FROM debt_loans WHERE id = $1 AND couple_id = $2 RETURNING id', [
+        debtId,
+        coupleId,
+      ]);
+      if (!del.rowCount) throw new HttpError(404, 'Catatan hutang/piutang tidak ditemukan.');
+      return res.json({ ok: true, id: debtId });
+    }
+
+    const list = mem.debtLoans.get(coupleId) || [];
+    const idx = list.findIndex((d) => d.id === debtId);
+    if (idx < 0) throw new HttpError(404, 'Catatan hutang/piutang tidak ditemukan.');
+    list.splice(idx, 1);
+    res.json({ ok: true, id: debtId });
+  })
+);
+
+// ============================================================================
+// Quick Add Presets
+// ============================================================================
+app.get(
+  '/api/presets',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    if (pool) {
+      const r = await pool.query(`${PRESET_SELECT_SQL} WHERE q.couple_id = $1 ORDER BY q.created_at ASC`, [coupleId]);
+      return res.json(r.rows);
+    }
+    const presets = [...(mem.quickPresets.get(coupleId) || [])]
+      .sort((a, b) => a.createdAtMs - b.createdAtMs)
+      .map((p) => hydrateMemQuickPreset(p, coupleId));
+    res.json(presets);
+  })
+);
+
+app.post(
+  '/api/presets',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const body = req.body || {};
+
+    const cleanLabel = parseRequiredText(body.label, 'Label preset wajib diisi.');
+    if (!['income', 'expense'].includes(body.type)) {
+      throw new HttpError(400, 'Tipe preset harus income atau expense.');
+    }
+    const numericAmount = parseStrictNumber(body.amount, 'Nominal preset harus lebih dari 0.', { exclusiveMin: 0 });
+    const rawCatId = body.categoryId !== undefined ? body.categoryId : body.category_id;
+    const cleanCategoryId =
+      rawCatId === undefined || rawCatId === null || rawCatId === '' ? null : assertUuid(rawCatId, 'categoryId');
+    const rawAccId = body.accountId !== undefined ? body.accountId : body.account_id;
+    const cleanAccountId =
+      rawAccId === undefined || rawAccId === null || rawAccId === '' ? null : assertUuid(rawAccId, 'accountId');
+    const cleanNote = String(body.note ?? '');
+    const id = randomUUID();
+    const createdAtIso = new Date().toISOString();
+
+    if (pool) {
+      const preset = await withPgTx(async (client) => {
+        if (cleanCategoryId) {
+          const cRes = await client.query('SELECT id FROM categories WHERE id = $1 AND couple_id = $2', [
+            cleanCategoryId,
+            coupleId,
+          ]);
+          if (!cRes.rowCount) throw new HttpError(404, 'Kategori tidak ditemukan.');
+        }
+        if (cleanAccountId) {
+          const aRes = await client.query('SELECT id FROM accounts WHERE id = $1 AND couple_id = $2', [
+            cleanAccountId,
+            coupleId,
+          ]);
+          if (!aRes.rowCount) throw new HttpError(404, 'Akun tidak ditemukan.');
+        }
+        await client.query(
+          `INSERT INTO quick_presets(id, couple_id, label, type, amount, category_id, account_id, note, created_at)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [id, coupleId, cleanLabel, body.type, numericAmount, cleanCategoryId, cleanAccountId, cleanNote, createdAtIso]
+        );
+        const joined = await client.query(`${PRESET_SELECT_SQL} WHERE q.id = $1 AND q.couple_id = $2`, [
+          id,
+          coupleId,
+        ]);
+        return joined.rows[0];
+      });
+      return res.status(201).json(preset);
+    }
+
+    if (cleanCategoryId) {
+      const cat = (mem.categories.get(coupleId) || []).find((c) => c.id === cleanCategoryId);
+      if (!cat) throw new HttpError(404, 'Kategori tidak ditemukan.');
+    }
+    if (cleanAccountId) {
+      const acc = (mem.accounts.get(coupleId) || []).find((a) => a.id === cleanAccountId);
+      if (!acc) throw new HttpError(404, 'Akun tidak ditemukan.');
+    }
+
+    if (!mem.quickPresets.has(coupleId)) mem.quickPresets.set(coupleId, []);
+    const presetObj = {
+      id,
+      coupleId,
+      label: cleanLabel,
+      type: body.type,
+      amount: numericAmount,
+      categoryId: cleanCategoryId,
+      accountId: cleanAccountId,
+      note: cleanNote,
+      createdAt: createdAtIso,
+      createdAtMs: Date.now(),
+    };
+    mem.quickPresets.get(coupleId).push(presetObj);
+    res.status(201).json(hydrateMemQuickPreset(presetObj, coupleId));
+  })
+);
+
+app.delete(
+  '/api/presets/:id',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const presetId = assertUuid(req.params.id, 'presetId');
+
+    if (pool) {
+      const del = await pool.query('DELETE FROM quick_presets WHERE id = $1 AND couple_id = $2 RETURNING id', [
+        presetId,
+        coupleId,
+      ]);
+      if (!del.rowCount) throw new HttpError(404, 'Preset cepat tidak ditemukan.');
+      return res.json({ ok: true, id: presetId });
+    }
+
+    const list = mem.quickPresets.get(coupleId) || [];
+    const idx = list.findIndex((p) => p.id === presetId);
+    if (idx < 0) throw new HttpError(404, 'Preset cepat tidak ditemukan.');
+    list.splice(idx, 1);
+    res.json({ ok: true, id: presetId });
+  })
+);
+
+// ============================================================================
+// Receipt Text Parser & Category Auto-Suggest
+// ============================================================================
+app.post(
+  '/api/receipts/parse',
+  authPartner,
+  asyncHandler(async (req, res) => {
+    const { coupleId } = req.partner;
+    const rawText = req.body?.text;
+    if (typeof rawText !== 'string' || !rawText.trim()) {
+      throw new HttpError(400, 'Teks struk wajib diisi.');
+    }
+
+    let categories = [];
+    if (pool) {
+      const cRes = await pool.query(
+        'SELECT id, name FROM categories WHERE couple_id = $1 ORDER BY is_default DESC, created_at ASC',
+        [coupleId]
+      );
+      categories = cRes.rows;
+    } else {
+      categories = mem.categories.get(coupleId) || [];
+    }
+
+    const merchant = extractReceiptMerchant(rawText);
+    const amount = parseReceiptAmount(rawText);
+    const { suggestedCategoryId, suggestedCategoryName } = suggestReceiptCategory(rawText, categories);
+
+    res.json({
+      amount,
+      merchant,
+      suggestedCategoryId,
+      suggestedCategoryName,
+      suggestedType: 'expense',
+    });
+  })
+);
+
 // JSON 404 fallback for unknown /api routes
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Endpoint tidak ditemukan.' });
@@ -2901,6 +4423,9 @@ export async function cleanupCouple(coupleId) {
   if (!coupleId) return;
   if (pool) {
     await withPgTx(async (client) => {
+      await client.query('DELETE FROM recurring_rules WHERE couple_id = $1', [coupleId]);
+      await client.query('DELETE FROM debt_loans WHERE couple_id = $1', [coupleId]);
+      await client.query('DELETE FROM quick_presets WHERE couple_id = $1', [coupleId]);
       await client.query('DELETE FROM account_transfers WHERE couple_id = $1', [coupleId]);
       await client.query('DELETE FROM transactions WHERE couple_id = $1', [coupleId]);
       await client.query('DELETE FROM budgets WHERE couple_id = $1', [coupleId]);
@@ -2910,6 +4435,9 @@ export async function cleanupCouple(coupleId) {
     });
     return;
   }
+  mem.recurringRules.delete(coupleId);
+  mem.debtLoans.delete(coupleId);
+  mem.quickPresets.delete(coupleId);
   mem.transfers.delete(coupleId);
   mem.transactions.delete(coupleId);
   mem.budgets.delete(coupleId);

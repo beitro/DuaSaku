@@ -20,11 +20,21 @@ import type {
   CoupleTransaction,
   CreateAccountPayload,
   CreateCategoryPayload,
+  CreateDebtLoanPayload,
   CreateNotePayload,
+  CreateQuickPresetPayload,
+  CreateRecurringRulePayload,
   CreateTransactionPayload,
+  DebtLoan,
   MonthlyAnalytics,
   MonthlyBudget,
   PartnerProfile,
+  PayRecurringRulePayload,
+  PayRecurringRuleResponse,
+  QuickPreset,
+  ReceiptParseResult,
+  RecurringRule,
+  SettleDebtLoanPayload,
   SharedNote,
   TabKey,
   TransactionType,
@@ -36,6 +46,7 @@ import type {
   UpdateCouplePayload,
   UpdateCoupleResponse,
   UpdateNotePayload,
+  UpdateRecurringRulePayload,
   UpdateTransactionPayload,
   UpsertBudgetPayload,
 } from '../types';
@@ -104,6 +115,9 @@ export interface DuaSakuContextValue {
   summary: CoupleSummary | null;
   analytics: MonthlyAnalytics | null;
   notes: SharedNote[];
+  recurringRules: RecurringRule[];
+  debtLoans: DebtLoan[];
+  quickPresets: QuickPreset[];
 
   // Feedback & Confirmation
   feedback: FeedbackState | null;
@@ -158,6 +172,23 @@ export interface DuaSakuContextValue {
   createNote: (payload: CreateNotePayload) => Promise<SharedNote>;
   updateNote: (id: string, payload: UpdateNotePayload) => Promise<SharedNote>;
   deleteNote: (id: string) => Promise<void>;
+  addRecurringRule: (payload: CreateRecurringRulePayload) => Promise<RecurringRule>;
+  toggleRecurringRule: (id: string, active?: boolean) => Promise<RecurringRule>;
+  updateRecurringRule: (id: string, payload: UpdateRecurringRulePayload) => Promise<RecurringRule>;
+  payRecurringRule: (
+    id: string,
+    payload?: PayRecurringRulePayload
+  ) => Promise<PayRecurringRuleResponse>;
+  deleteRecurringRule: (id: string) => Promise<void>;
+  addDebtLoan: (payload: CreateDebtLoanPayload) => Promise<DebtLoan>;
+  settleDebtLoan: (
+    id: string,
+    amountOrPayload?: number | SettleDebtLoanPayload
+  ) => Promise<DebtLoan>;
+  deleteDebtLoan: (id: string) => Promise<void>;
+  addQuickPreset: (payload: CreateQuickPresetPayload) => Promise<QuickPreset>;
+  deleteQuickPreset: (id: string) => Promise<void>;
+  parseReceiptText: (text: string) => Promise<ReceiptParseResult>;
   exportMonthlyReport: (format: 'csv' | 'json') => Promise<void>;
 }
 
@@ -231,6 +262,9 @@ export function DuaSakuProvider({
   const [summary, setSummary] = useState<CoupleSummary | null>(null);
   const [analytics, setAnalytics] = useState<MonthlyAnalytics | null>(null);
   const [notes, setNotes] = useState<SharedNote[]>([]);
+  const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([]);
+  const [debtLoans, setDebtLoans] = useState<DebtLoan[]>([]);
+  const [quickPresets, setQuickPresets] = useState<QuickPreset[]>([]);
 
   const [feedback, setFeedback] = useState<FeedbackState | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
@@ -238,6 +272,7 @@ export function DuaSakuProvider({
 
   const syncSeqRef = useRef<number>(0);
   const meRef = useRef<PartnerProfile | null>(me);
+  const recurringRulesRef = useRef<RecurringRule[]>(recurringRules);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const feedbackSeqRef = useRef<number>(0);
   const confirmBusyRef = useRef<boolean>(false);
@@ -245,6 +280,10 @@ export function DuaSakuProvider({
   useEffect(() => {
     meRef.current = me;
   }, [me]);
+
+  useEffect(() => {
+    recurringRulesRef.current = recurringRules;
+  }, [recurringRules]);
 
   const clearFeedbackTimer = useCallback(() => {
     if (feedbackTimerRef.current !== null) {
@@ -310,6 +349,9 @@ export function DuaSakuProvider({
     setSummary(null);
     setAnalytics(null);
     setNotes([]);
+    setRecurringRules([]);
+    setDebtLoans([]);
+    setQuickPresets([]);
     setQuickEntry(INITIAL_QUICK_ENTRY);
   }, []);
 
@@ -325,20 +367,14 @@ export function DuaSakuProvider({
       const tzOffset = getLocalTzOffset();
 
       try {
-        const [cp, cats, accRes, trList, txs, budRes, sum, ana, nts] = await Promise.all([
-          duaSakuApi.getCouple(authToken),
+        const [bootstrap, cats] = await Promise.all([
+          duaSakuApi.getBootstrap(authToken, { month, tzOffset }),
           duaSakuApi.getCategories(authToken),
-          duaSakuApi.getAccounts(authToken),
-          duaSakuApi.getAccountTransfers(authToken, { month, tzOffset }),
-          duaSakuApi.getTransactions(authToken, { month, tzOffset }),
-          duaSakuApi.getBudgets(authToken, { month, tzOffset }),
-          duaSakuApi.getSummary(authToken, { month, tzOffset }),
-          duaSakuApi.getAnalytics(authToken, { month, tzOffset }),
-          duaSakuApi.getNotes(authToken),
         ]);
 
         if (seq !== syncSeqRef.current) return;
 
+        const cp = bootstrap.couple;
         setCouple(cp);
         const prevMe = meRef.current;
         if (prevMe) {
@@ -348,20 +384,18 @@ export function DuaSakuProvider({
           setMe(nextMe);
         }
         setCategories(cats);
-        setAccounts(accRes.accounts);
-        setAccountTotals(accRes.totals);
-        setTransfers(trList);
-        setTransactions(txs);
-        setBudgets(budRes.budgets);
-        setBudgetTotals({
-          month: budRes.month,
-          totalLimit: budRes.totalLimit,
-          totalSpent: budRes.totalSpent,
-          totalRemaining: budRes.totalRemaining,
-        });
-        setSummary(sum);
-        setAnalytics(ana);
-        setNotes(nts);
+        setAccounts(bootstrap.accounts);
+        setAccountTotals(bootstrap.accountTotals);
+        setTransfers(bootstrap.transfers);
+        setTransactions(bootstrap.transactions);
+        setBudgets(bootstrap.budgets);
+        setBudgetTotals(bootstrap.budgetTotals);
+        setSummary(bootstrap.summary);
+        setAnalytics(bootstrap.analytics);
+        setNotes(bootstrap.notes);
+        setRecurringRules(bootstrap.recurringRules);
+        setDebtLoans(bootstrap.debtLoans);
+        setQuickPresets(bootstrap.quickPresets);
       } catch (err) {
         if (seq !== syncSeqRef.current) return;
         if (err instanceof ApiError && err.status === 401) {
@@ -902,6 +936,163 @@ export function DuaSakuProvider({
     [requireToken, selectedMonth, showError, showSuccess]
   );
 
+  const runMutation = useCallback(
+    async <T,>(
+      fn: (authToken: string) => Promise<T>,
+      successMsg: string | ((result: T) => string),
+      errorFallback: string,
+      errorTitle = 'Gagal Simpan'
+    ): Promise<T> => {
+      const authToken = requireToken();
+      setLoading(true);
+      try {
+        const result = await fn(authToken);
+        await syncAll(authToken, selectedMonth);
+        showSuccess(typeof successMsg === 'function' ? successMsg(result) : successMsg);
+        return result;
+      } catch (err) {
+        showError(getErrorMessage(err, errorFallback), errorTitle);
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [requireToken, selectedMonth, showError, showSuccess, syncAll]
+  );
+
+  const addRecurringRule = useCallback(
+    (payload: CreateRecurringRulePayload): Promise<RecurringRule> =>
+      runMutation(
+        (authToken) => duaSakuApi.createRecurringRule(authToken, payload),
+        (rule) => `Tagihan rutin "${rule.title}" berhasil ditambahkan.`,
+        'Gagal menambahkan tagihan rutin.'
+      ),
+    [runMutation]
+  );
+
+  const updateRecurringRule = useCallback(
+    (id: string, payload: UpdateRecurringRulePayload): Promise<RecurringRule> =>
+      runMutation(
+        (authToken) => duaSakuApi.updateRecurringRule(authToken, id, payload),
+        (rule) => `Tagihan rutin "${rule.title}" berhasil diperbarui.`,
+        'Gagal memperbarui tagihan rutin.'
+      ),
+    [runMutation]
+  );
+
+  const toggleRecurringRule = useCallback(
+    (id: string, active?: boolean): Promise<RecurringRule> => {
+      const current = recurringRulesRef.current.find((r) => r.id === id);
+      const nextActive = active !== undefined ? active : current ? !current.active : true;
+      return runMutation(
+        (authToken) => duaSakuApi.updateRecurringRule(authToken, id, { active: nextActive }),
+        (rule) =>
+          rule.active
+            ? `Tagihan rutin "${rule.title}" diaktifkan.`
+            : `Tagihan rutin "${rule.title}" dijeda.`,
+        'Gagal mengubah status tagihan rutin.'
+      );
+    },
+    [runMutation]
+  );
+
+  const payRecurringRule = useCallback(
+    (id: string, payload: PayRecurringRulePayload = {}): Promise<PayRecurringRuleResponse> =>
+      runMutation(
+        (authToken) => duaSakuApi.payRecurringRule(authToken, id, payload),
+        (res) => `Tagihan "${res.rule.title}" dicatat & jadwal dimajukan.`,
+        'Gagal membayar tagihan rutin.'
+      ),
+    [runMutation]
+  );
+
+  const deleteRecurringRule = useCallback(
+    async (id: string): Promise<void> => {
+      await runMutation(
+        (authToken) => duaSakuApi.deleteRecurringRule(authToken, id),
+        'Tagihan rutin berhasil dihapus.',
+        'Gagal menghapus tagihan rutin.',
+        'Gagal Hapus'
+      );
+    },
+    [runMutation]
+  );
+
+  const addDebtLoan = useCallback(
+    (payload: CreateDebtLoanPayload): Promise<DebtLoan> =>
+      runMutation(
+        (authToken) => duaSakuApi.createDebt(authToken, payload),
+        (debt) => `Catatan ${debt.direction === 'payable' ? 'hutang' : 'piutang'} "${debt.personName}" disimpan.`,
+        'Gagal menyimpan catatan hutang/piutang.'
+      ),
+    [runMutation]
+  );
+
+  const settleDebtLoan = useCallback(
+    (id: string, amountOrPayload?: number | SettleDebtLoanPayload): Promise<DebtLoan> => {
+      const payload: SettleDebtLoanPayload =
+        typeof amountOrPayload === 'number'
+          ? { amount: amountOrPayload }
+          : amountOrPayload ?? {};
+      return runMutation(
+        (authToken) => duaSakuApi.settleDebt(authToken, id, payload),
+        (debt) =>
+          debt.settled
+            ? `Catatan "${debt.personName}" telah lunas.`
+            : `Pembayaran sebagian untuk "${debt.personName}" dicatat.`,
+        'Gagal mencatat pembayaran hutang/piutang.'
+      );
+    },
+    [runMutation]
+  );
+
+  const deleteDebtLoan = useCallback(
+    async (id: string): Promise<void> => {
+      await runMutation(
+        (authToken) => duaSakuApi.deleteDebt(authToken, id),
+        'Catatan hutang/piutang berhasil dihapus.',
+        'Gagal menghapus catatan hutang/piutang.',
+        'Gagal Hapus'
+      );
+    },
+    [runMutation]
+  );
+
+  const addQuickPreset = useCallback(
+    (payload: CreateQuickPresetPayload): Promise<QuickPreset> =>
+      runMutation(
+        (authToken) => duaSakuApi.createPreset(authToken, payload),
+        (preset) => `Preset cepat "${preset.label}" ditambahkan.`,
+        'Gagal menambahkan preset cepat.'
+      ),
+    [runMutation]
+  );
+
+  const deleteQuickPreset = useCallback(
+    async (id: string): Promise<void> => {
+      await runMutation(
+        (authToken) => duaSakuApi.deletePreset(authToken, id),
+        'Preset cepat berhasil dihapus.',
+        'Gagal menghapus preset cepat.',
+        'Gagal Hapus'
+      );
+    },
+    [runMutation]
+  );
+
+  const parseReceiptText = useCallback(
+    async (text: string): Promise<ReceiptParseResult> => {
+      const authToken = requireToken();
+      try {
+        return await duaSakuApi.parseReceipt(authToken, text);
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal membaca teks struk.'), 'Gagal Baca Struk');
+        throw err;
+      }
+    },
+    [requireToken, showError]
+  );
+
   const requestConfirm = useCallback((req: ConfirmRequest) => {
     setConfirmState({
       ...req,
@@ -984,6 +1175,9 @@ export function DuaSakuProvider({
       summary,
       analytics,
       notes,
+      recurringRules,
+      debtLoans,
+      quickPresets,
       feedback,
       showError,
       showSuccess,
@@ -1021,6 +1215,17 @@ export function DuaSakuProvider({
       createNote,
       updateNote,
       deleteNote,
+      addRecurringRule,
+      toggleRecurringRule,
+      updateRecurringRule,
+      payRecurringRule,
+      deleteRecurringRule,
+      addDebtLoan,
+      settleDebtLoan,
+      deleteDebtLoan,
+      addQuickPreset,
+      deleteQuickPreset,
+      parseReceiptText,
       exportMonthlyReport,
     }),
     [
@@ -1043,6 +1248,9 @@ export function DuaSakuProvider({
       summary,
       analytics,
       notes,
+      recurringRules,
+      debtLoans,
+      quickPresets,
       feedback,
       showError,
       showSuccess,
@@ -1079,6 +1287,17 @@ export function DuaSakuProvider({
       createNote,
       updateNote,
       deleteNote,
+      addRecurringRule,
+      toggleRecurringRule,
+      updateRecurringRule,
+      payRecurringRule,
+      deleteRecurringRule,
+      addDebtLoan,
+      settleDebtLoan,
+      deleteDebtLoan,
+      addQuickPreset,
+      deleteQuickPreset,
+      parseReceiptText,
       exportMonthlyReport,
     ]
   );

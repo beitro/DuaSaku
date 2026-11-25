@@ -10,13 +10,14 @@ import {
 import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import type { TransactionType } from '../types';
-import { formatMonthLabel, formatRp, formatSignedRp } from '../utils/format';
+import { formatMonthLabel, formatRp, formatSignedRp, parseIdrInput } from '../utils/format';
 
 export function TransactionsScreen(): React.JSX.Element {
   const {
     selectedMonth,
     transactions,
     couple,
+    categories,
     accounts,
     openEditTransaction,
     openNewTransaction,
@@ -27,21 +28,30 @@ export function TransactionsScreen(): React.JSX.Element {
   const [partnerFilter, setPartnerFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | TransactionType>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [minAmountInput, setMinAmountInput] = useState('');
+  const [maxAmountInput, setMaxAmountInput] = useState('');
+  const [showAdvancedFilter, setShowAdvancedFilter] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const minAmt = minAmountInput.trim() ? parseIdrInput(minAmountInput) : 0;
+    const maxAmt = maxAmountInput.trim() ? parseIdrInput(maxAmountInput) : 0;
     return transactions.filter((tx) => {
       if (partnerFilter !== 'all' && tx.partnerId !== partnerFilter) return false;
       if (typeFilter !== 'all' && tx.type !== typeFilter) return false;
       if (accountFilter !== 'all' && (tx.accountId || 'none') !== accountFilter) return false;
+      if (categoryFilter !== 'all' && tx.categoryId !== categoryFilter) return false;
+      if (minAmt > 0 && tx.amount < minAmt) return false;
+      if (maxAmt > 0 && tx.amount > maxAmt) return false;
       if (q) {
         const hay = `${tx.categoryName} ${tx.note} ${tx.partnerName} ${tx.accountName || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [transactions, partnerFilter, typeFilter, accountFilter, searchQuery]);
+  }, [transactions, partnerFilter, typeFilter, accountFilter, categoryFilter, minAmountInput, maxAmountInput, searchQuery]);
 
   const monthTotals = useMemo(() => {
     let income = 0;
@@ -75,13 +85,73 @@ export function TransactionsScreen(): React.JSX.Element {
       </View>
 
       {/* Search & Filters */}
-      <TextInput
-        style={styles.searchInput}
-        value={searchQuery}
-        onChangeText={setSearchQuery}
-        placeholder="Cari transaksi, kategori, atau dompet..."
-        placeholderTextColor={COLORS.textPlaceholder}
-      />
+      <View style={styles.searchRow}>
+        <TextInput
+          style={[styles.searchInput, { flex: 1, marginBottom: 0 }]}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Cari transaksi, kategori, atau dompet..."
+          placeholderTextColor={COLORS.textPlaceholder}
+          testID="transactions-search-input"
+        />
+        <TouchableOpacity
+          style={[styles.advToggleBtn, showAdvancedFilter && styles.advToggleBtnActive]}
+          onPress={() => setShowAdvancedFilter((v) => !v)}
+          testID="transactions-adv-filter-btn"
+        >
+          <Text style={[styles.advToggleText, showAdvancedFilter && styles.advToggleTextActive]}>
+            Filter
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {showAdvancedFilter && (
+        <View style={styles.advPanel} testID="transactions-adv-panel">
+          <Text style={styles.advLabel}>Kategori</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SPACING.sm }}>
+            <TouchableOpacity
+              style={[styles.chip, categoryFilter === 'all' && styles.chipActive]}
+              onPress={() => setCategoryFilter('all')}
+            >
+              <Text style={[styles.chipText, categoryFilter === 'all' && styles.chipTextActive]}>
+                Semua Kategori
+              </Text>
+            </TouchableOpacity>
+            {categories.map((c) => (
+              <TouchableOpacity
+                key={c.id}
+                style={[styles.chip, categoryFilter === c.id && styles.chipActive]}
+                onPress={() => setCategoryFilter(c.id)}
+              >
+                <Text style={[styles.chipText, categoryFilter === c.id && styles.chipTextActive]}>
+                  {c.icon} {c.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+          <Text style={styles.advLabel}>Rentang Nominal (Rp)</Text>
+          <View style={styles.rangeRow}>
+            <TextInput
+              style={[styles.searchInput, styles.rangeInput]}
+              keyboardType="numeric"
+              value={minAmountInput}
+              onChangeText={setMinAmountInput}
+              placeholder="Min (cth: 50000)"
+              placeholderTextColor={COLORS.textPlaceholder}
+              testID="transactions-min-amount"
+            />
+            <TextInput
+              style={[styles.searchInput, styles.rangeInput]}
+              keyboardType="numeric"
+              value={maxAmountInput}
+              onChangeText={setMaxAmountInput}
+              placeholder="Maks (cth: 500000)"
+              placeholderTextColor={COLORS.textPlaceholder}
+              testID="transactions-max-amount"
+            />
+          </View>
+        </View>
+      )}
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
         <TouchableOpacity
@@ -161,6 +231,13 @@ export function TransactionsScreen(): React.JSX.Element {
             </Text>
             {!!tx.note && <Text style={styles.txNote}>{tx.note}</Text>}
             <View style={styles.txActions}>
+              <TouchableOpacity
+                style={styles.actionPill}
+                onPress={() => openNewTransaction(tx.type, tx.amount, tx.categoryId)}
+                testID={`tx-duplicate-${tx.id}`}
+              >
+                <Text style={styles.actionPillText}>Catat Lagi</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 style={styles.actionPill}
                 onPress={() => openEditTransaction(tx)}
@@ -343,5 +420,53 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
     textAlign: 'center',
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs + 2,
+    marginBottom: SPACING.sm,
+  },
+  advToggleBtn: {
+    backgroundColor: COLORS.warmSand,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  advToggleBtnActive: {
+    backgroundColor: COLORS.heroCocoa,
+    borderColor: COLORS.heroCocoa,
+  },
+  advToggleText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  advToggleTextActive: {
+    color: COLORS.white,
+  },
+  advPanel: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADII.lg,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.md,
+  },
+  advLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    marginBottom: 6,
+  },
+  rangeRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  rangeInput: {
+    flex: 1,
+    marginBottom: 0,
   },
 });

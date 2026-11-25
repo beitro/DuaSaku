@@ -15,6 +15,7 @@ import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import type { MonthlyBudget } from '../types';
 import { formatMonthLabel, formatRp, parseIdrInput } from '../utils/format';
+import { RecurringBillsPanel } from '../components/RecurringBillsPanel';
 
 export function BudgetsScreen(): React.JSX.Element {
   const {
@@ -30,6 +31,7 @@ export function BudgetsScreen(): React.JSX.Element {
   } = useDuaSaku();
   const { height } = useWindowDimensions();
 
+  const [subTab, setSubTab] = useState<'budgets' | 'recurring'>('budgets');
   const [modalVisible, setModalVisible] = useState(false);
   const [editing, setEditing] = useState<MonthlyBudget | null>(null);
   const [categoryId, setCategoryId] = useState('');
@@ -82,7 +84,32 @@ export function BudgetsScreen(): React.JSX.Element {
 
   return (
     <View style={styles.container} testID="budgets-screen">
-      {/* Monthly Budget Hero */}
+      <View style={styles.subTabRow}>
+        <TouchableOpacity
+          style={[styles.subTabBtn, subTab === 'budgets' && styles.subTabBtnActive]}
+          onPress={() => setSubTab('budgets')}
+          testID="budgets-subtab-budgets"
+        >
+          <Text style={[styles.subTabText, subTab === 'budgets' && styles.subTabTextActive]}>
+            🎯 Anggaran Bulanan
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.subTabBtn, subTab === 'recurring' && styles.subTabBtnActive]}
+          onPress={() => setSubTab('recurring')}
+          testID="budgets-subtab-recurring"
+        >
+          <Text style={[styles.subTabText, subTab === 'recurring' && styles.subTabTextActive]}>
+            🔁 Tagihan Berulang
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {subTab === 'recurring' ? (
+        <RecurringBillsPanel />
+      ) : (
+        <>
+          {/* Monthly Budget Hero */}
       <View style={styles.heroCard}>
         <View style={styles.rowBetween}>
           <Text style={styles.heroKicker}>Anggaran — {formatMonthLabel(selectedMonth)}</Text>
@@ -220,6 +247,8 @@ export function BudgetsScreen(): React.JSX.Element {
           </View>
         </View>
       </Modal>
+        </>
+      )}
     </View>
   );
 }
@@ -424,5 +453,31 @@ const styles = StyleSheet.create({
   saveBtnText: {
     color: COLORS.white,
     fontWeight: '800',
+  },
+  subTabRow: {
+    flexDirection: 'row',
+    gap: SPACING.xs + 2,
+    marginBottom: SPACING.md,
+  },
+  subTabBtn: {
+    flex: 1,
+    backgroundColor: COLORS.warmSand,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.pill,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  subTabBtnActive: {
+    backgroundColor: COLORS.heroCocoa,
+    borderColor: COLORS.heroCocoa,
+  },
+  subTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  subTabTextActive: {
+    color: COLORS.textOnDark,
   },
 });

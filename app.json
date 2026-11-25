@@ -3,10 +3,12 @@
     "name": "DuaSaku — Keuangan Pasangan",
     "slug": "duasaku",
     "version": "1.0.0",
+    "scheme": "duasaku",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "plugins": [
-      "./plugins/withCleartextTraffic.js"
+      "./plugins/withCleartextTraffic.js",
+      "./plugins/withAppShortcuts.js"
     ],
     "android": {
       "package": "com.duasaku.couplefinance",

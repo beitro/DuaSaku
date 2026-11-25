@@ -360,3 +360,146 @@ export interface MonthlyExportJson {
   transactions: CoupleTransaction[];
   transfers: AccountTransfer[];
 }
+
+export type RecurringFrequency = 'weekly' | 'monthly' | 'yearly';
+
+export interface RecurringRule {
+  id: string;
+  coupleId: string;
+  title: string;
+  type: TransactionType;
+  amount: number;
+  categoryId: string;
+  categoryName: string;
+  categoryIcon: string;
+  accountId: string | null;
+  accountName: string | null;
+  accountIcon: string | null;
+  frequency: RecurringFrequency;
+  nextDueDate: string;
+  active: boolean;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface CreateRecurringRulePayload {
+  title: string;
+  type: TransactionType;
+  amount: number;
+  categoryId: string;
+  accountId?: string | null;
+  frequency: RecurringFrequency;
+  nextDueDate?: string;
+  active?: boolean;
+}
+
+export interface UpdateRecurringRulePayload {
+  title?: string;
+  type?: TransactionType;
+  amount?: number;
+  categoryId?: string;
+  accountId?: string | null;
+  frequency?: RecurringFrequency;
+  nextDueDate?: string;
+  active?: boolean;
+}
+
+export interface PayRecurringRulePayload {
+  date?: string;
+  occurredAt?: string;
+  accountId?: string | null;
+  amount?: number;
+  note?: string;
+}
+
+export interface PayRecurringRuleResponse {
+  transaction: CoupleTransaction;
+  rule: RecurringRule;
+}
+
+export type DebtDirection = 'payable' | 'receivable';
+
+export interface DebtLoan {
+  id: string;
+  coupleId: string;
+  personName: string;
+  direction: DebtDirection;
+  amount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  note: string;
+  dueDate: string | null;
+  settled: boolean;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface CreateDebtLoanPayload {
+  personName: string;
+  direction: DebtDirection;
+  amount: number;
+  note?: string;
+  dueDate?: string | null;
+}
+
+export interface SettleDebtLoanPayload {
+  amount?: number;
+}
+
+export interface QuickPreset {
+  id: string;
+  coupleId: string;
+  label: string;
+  type: TransactionType;
+  amount: number;
+  categoryId: string | null;
+  categoryName: string | null;
+  categoryIcon: string | null;
+  accountId: string | null;
+  accountName: string | null;
+  accountIcon: string | null;
+  note: string;
+  createdAt: string;
+}
+
+export interface CreateQuickPresetPayload {
+  label: string;
+  type: TransactionType;
+  amount: number;
+  categoryId?: string | null;
+  accountId?: string | null;
+  note?: string;
+}
+
+export interface ReceiptParseResult {
+  amount: number | null;
+  merchant: string | null;
+  suggestedCategoryId: string | null;
+  suggestedCategoryName: string | null;
+  suggestedType: TransactionType;
+}
+
+export interface BootstrapPayload {
+  month: string;
+  couple: CoupleSpace;
+  categories: CategoryGoal[];
+  accounts: CoupleAccount[];
+  accountTotals: AccountTotals;
+  transfers: AccountTransfer[];
+  transactions: CoupleTransaction[];
+  budgets: MonthlyBudget[];
+  budgetTotals: {
+    month: string;
+    totalLimit: number;
+    totalSpent: number;
+    totalRemaining: number;
+  };
+  summary: CoupleSummary;
+  analytics: MonthlyAnalytics;
+  notes: SharedNote[];
+  recurringRules: RecurringRule[];
+  debtLoans: DebtLoan[];
+  quickPresets: QuickPreset[];
+}

@@ -112,3 +112,53 @@ ALTER TABLE partners
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_partners_email_lower
   ON partners(LOWER(email)) WHERE email IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS recurring_rules (
+  id UUID PRIMARY KEY,
+  couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  type VARCHAR(10) NOT NULL CHECK (type IN ('income', 'expense')),
+  amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+  category_id UUID NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+  account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+  frequency VARCHAR(16) NOT NULL CHECK (frequency IN ('weekly', 'monthly', 'yearly')),
+  next_due_date VARCHAR(10) NOT NULL CHECK (next_due_date ~ '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$'),
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_by UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_rules_couple_due
+  ON recurring_rules(couple_id, next_due_date ASC);
+
+CREATE TABLE IF NOT EXISTS debt_loans (
+  id UUID PRIMARY KEY,
+  couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  person_name TEXT NOT NULL,
+  direction VARCHAR(16) NOT NULL CHECK (direction IN ('payable', 'receivable')),
+  amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+  paid_amount NUMERIC(15, 2) NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
+  note TEXT NOT NULL DEFAULT '',
+  due_date VARCHAR(10) CHECK (due_date IS NULL OR due_date ~ '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$'),
+  settled BOOLEAN NOT NULL DEFAULT false,
+  created_by UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_debt_loans_couple_settled
+  ON debt_loans(couple_id, settled ASC, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS quick_presets (
+  id UUID PRIMARY KEY,
+  couple_id UUID NOT NULL REFERENCES couples(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  type VARCHAR(10) NOT NULL CHECK (type IN ('income', 'expense')),
+  amount NUMERIC(15, 2) NOT NULL CHECK (amount > 0),
+  category_id UUID REFERENCES categories(id) ON DELETE SET NULL,
+  account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_quick_presets_couple_created
+  ON quick_presets(couple_id, created_at ASC);

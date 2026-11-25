@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, QUICK_AMOUNT_PRESETS, RADII, SHADOWS, SPACING } from '../theme/tokens';
-import type { TransactionType } from '../types';
+import type { QuickPreset, TransactionType } from '../types';
 import {
   formatRp,
   isValidDateInput,
@@ -21,6 +21,8 @@ import {
   shiftDateInput,
   toLocalDateInput,
 } from '../utils/format';
+import { parseReceiptLocally } from '../utils/receiptParser';
+import { CalculatorKeypad } from './CalculatorKeypad';
 
 export function QuickEntrySheet(): React.JSX.Element | null {
   const {
@@ -29,12 +31,15 @@ export function QuickEntrySheet(): React.JSX.Element | null {
     closeQuickEntry,
     categories,
     accounts,
+    quickPresets,
     selectedMonth,
     createTransaction,
     updateTransaction,
     deleteTransaction,
+    parseReceiptText,
     requestConfirm,
     showError,
+    showSuccess,
   } = useDuaSaku();
   const { height } = useWindowDimensions();
 
@@ -46,6 +51,10 @@ export function QuickEntrySheet(): React.JSX.Element | null {
   const [dateInput, setDateInput] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [showReceiptBox, setShowReceiptBox] = useState(false);
+  const [receiptText, setReceiptText] = useState('');
+  const [parsingReceipt, setParsingReceipt] = useState(false);
   const prevOpenRef = useRef(false);
   const prevQuickEntryRef = useRef(quickEntry);
 
@@ -64,6 +73,9 @@ export function QuickEntrySheet(): React.JSX.Element | null {
     }
 
     setFormError(null);
+    setShowCalculator(false);
+    setShowReceiptBox(false);
+    setReceiptText('');
     if (quickEntry.mode === 'edit' && quickEntry.editingTx) {
       const tx = quickEntry.editingTx;
       setType(tx.type);
@@ -154,6 +166,49 @@ export function QuickEntrySheet(): React.JSX.Element | null {
     });
   };
 
+  const applyQuickPreset = (preset: QuickPreset) => {
+    setType(preset.type);
+    setAmountInput(String(Math.round(preset.amount)));
+    if (preset.categoryId) setCategoryId(preset.categoryId);
+    if (preset.accountId) setAccountId(preset.accountId);
+    if (preset.note) setNote(preset.note);
+    setShowCalculator(false);
+    setFormError(null);
+  };
+
+  const handleParseReceipt = async () => {
+    const trimmed = receiptText.trim();
+    if (!trimmed) {
+      setFormError('Tempel teks struk terlebih dahulu untuk dianalisa.');
+      return;
+    }
+    setParsingReceipt(true);
+    setFormError(null);
+    try {
+      const remote = await parseReceiptText(trimmed);
+      if (remote.amount && remote.amount > 0) {
+        setAmountInput(String(Math.round(remote.amount)));
+      }
+      if (remote.suggestedCategoryId) {
+        setCategoryId(remote.suggestedCategoryId);
+      }
+      if (remote.merchant) {
+        setNote(remote.merchant);
+      }
+      setType(remote.suggestedType || 'expense');
+      setShowReceiptBox(false);
+      showSuccess('Struk berhasil dianalisa ke form.');
+    } catch {
+      const local = parseReceiptLocally(trimmed, categories);
+      if (local.amount && local.amount > 0) setAmountInput(String(local.amount));
+      if (local.suggestedCategoryId) setCategoryId(local.suggestedCategoryId);
+      if (local.note) setNote(local.note);
+      setShowReceiptBox(false);
+    } finally {
+      setParsingReceipt(false);
+    }
+  };
+
   return (
     <Modal
       visible={quickEntryOpen}
@@ -201,8 +256,57 @@ export function QuickEntrySheet(): React.JSX.Element | null {
               </TouchableOpacity>
             </View>
 
+            {/* 1-Tap Quick Presets */}
+            {quickPresets.length > 0 && quickEntry.mode === 'create' && (
+              <View style={styles.quickPresetsBlock}>
+                <Text style={styles.label}>Template Cepat 1-Tap</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetRow}>
+                  {quickPresets.map((p) => (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={styles.templateChip}
+                      onPress={() => applyQuickPreset(p)}
+                      testID={`quick-template-${p.id}`}
+                    >
+                      <Text style={styles.templateChipText}>
+                        {p.categoryIcon || '⚡'} {p.label} · {formatRp(p.amount)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
             {/* Amount & Presets */}
-            <Text style={styles.label}>Nominal (Rp)</Text>
+            <View style={styles.labelActionRow}>
+              <Text style={styles.label}>Nominal (Rp)</Text>
+              <View style={styles.toolPillRow}>
+                <TouchableOpacity
+                  style={[styles.toolPill, showCalculator && styles.toolPillActive]}
+                  onPress={() => {
+                    setShowCalculator((v) => !v);
+                    setShowReceiptBox(false);
+                  }}
+                  testID="toggle-calculator-btn"
+                >
+                  <Text style={[styles.toolPillText, showCalculator && styles.toolPillTextActive]}>
+                    🧮 Kalkulator
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.toolPill, showReceiptBox && styles.toolPillActive]}
+                  onPress={() => {
+                    setShowReceiptBox((v) => !v);
+                    setShowCalculator(false);
+                  }}
+                  testID="toggle-receipt-btn"
+                >
+                  <Text style={[styles.toolPillText, showReceiptBox && styles.toolPillTextActive]}>
+                    📄 Scan Struk
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
             <TextInput
               style={styles.amountInput}
               keyboardType="numeric"
@@ -212,6 +316,47 @@ export function QuickEntrySheet(): React.JSX.Element | null {
               placeholderTextColor={COLORS.textPlaceholder}
               testID="quick-entry-amount-input"
             />
+            {showCalculator && (
+              <View style={styles.toolContainer}>
+                <CalculatorKeypad
+                  initialValue={amountInput || '0'}
+                  accent={type}
+                  onConfirm={(amount) => {
+                    setAmountInput(String(amount));
+                    setShowCalculator(false);
+                  }}
+                  onCancel={() => setShowCalculator(false)}
+                  testID="quick-entry-calculator"
+                />
+              </View>
+            )}
+            {showReceiptBox && (
+              <View style={styles.toolContainer}>
+                <Text style={styles.receiptHint}>
+                  Tempel teks struk belanja/e-wallet untuk isi nominal, merchant & kategori otomatis:
+                </Text>
+                <TextInput
+                  style={styles.receiptInput}
+                  multiline
+                  numberOfLines={3}
+                  value={receiptText}
+                  onChangeText={setReceiptText}
+                  placeholder={'Contoh:\nKOPI KENANGAN\nEs Kopi Susu Rp 24.000\nTotal Rp 24.000'}
+                  placeholderTextColor={COLORS.textPlaceholder}
+                  testID="receipt-text-input"
+                />
+                <TouchableOpacity
+                  style={[styles.receiptParseBtn, parsingReceipt && { opacity: 0.65 }]}
+                  onPress={handleParseReceipt}
+                  disabled={parsingReceipt}
+                  testID="receipt-parse-btn"
+                >
+                  <Text style={styles.receiptParseBtnText}>
+                    {parsingReceipt ? 'Menganalisa...' : 'Analisa Struk Otomatis'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetRow}>
               {QUICK_AMOUNT_PRESETS.map((p) => {
                 const selected = parsedAmount === p.amount;
@@ -573,5 +718,83 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontWeight: '800',
     fontSize: 14,
+  },
+  quickPresetsBlock: {
+    marginBottom: SPACING.xs,
+  },
+  templateChip: {
+    backgroundColor: COLORS.ochreSoft,
+    borderWidth: 1,
+    borderColor: COLORS.ochre,
+    borderRadius: RADII.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    marginRight: SPACING.xs + 2,
+  },
+  templateChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.ochreDark,
+  },
+  labelActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  toolPillRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  toolPill: {
+    backgroundColor: COLORS.warmSand,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  toolPillActive: {
+    backgroundColor: COLORS.heroCocoa,
+    borderColor: COLORS.heroCocoa,
+  },
+  toolPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  toolPillTextActive: {
+    color: COLORS.white,
+  },
+  toolContainer: {
+    marginBottom: SPACING.md,
+  },
+  receiptHint: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  receiptInput: {
+    backgroundColor: COLORS.bgCream,
+    borderWidth: 1,
+    borderColor: COLORS.borderStrong,
+    borderRadius: RADII.md,
+    padding: SPACING.sm,
+    fontSize: 13,
+    color: COLORS.textPrimary,
+    minHeight: 72,
+    textAlignVertical: 'top',
+    marginBottom: SPACING.xs + 2,
+  },
+  receiptParseBtn: {
+    backgroundColor: COLORS.sageBtn,
+    borderRadius: RADII.md,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  receiptParseBtnText: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

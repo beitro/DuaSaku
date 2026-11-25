@@ -15,6 +15,7 @@ import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import type { SharedNote } from '../types';
 import { formatShortDateId } from '../utils/format';
+import { DebtLoansPanel } from '../components/DebtLoansPanel';
 
 export function NotesScreen(): React.JSX.Element {
   const {
@@ -28,6 +29,7 @@ export function NotesScreen(): React.JSX.Element {
   } = useDuaSaku();
   const { height } = useWindowDimensions();
 
+  const [subTab, setSubTab] = useState<'notes' | 'debts'>('notes');
   const [showModal, setShowModal] = useState(false);
   const [editingNote, setEditingNote] = useState<SharedNote | null>(null);
   const [title, setTitle] = useState('');
@@ -131,7 +133,32 @@ export function NotesScreen(): React.JSX.Element {
 
   return (
     <View style={styles.container} testID="notes-screen">
-      <View style={styles.headerRow}>
+      <View style={styles.subTabRow}>
+        <TouchableOpacity
+          style={[styles.subTabBtn, subTab === 'notes' && styles.subTabBtnActive]}
+          onPress={() => setSubTab('notes')}
+          testID="notes-subtab-notes"
+        >
+          <Text style={[styles.subTabText, subTab === 'notes' && styles.subTabTextActive]}>
+            📝 Catatan Bersama
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.subTabBtn, subTab === 'debts' && styles.subTabBtnActive]}
+          onPress={() => setSubTab('debts')}
+          testID="notes-subtab-debts"
+        >
+          <Text style={[styles.subTabText, subTab === 'debts' && styles.subTabTextActive]}>
+            🤝 Hutang & Patungan
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {subTab === 'debts' ? (
+        <DebtLoansPanel />
+      ) : (
+        <>
+          <View style={styles.headerRow}>
         <View style={styles.headerText}>
           <Text style={styles.sectionTitle}>Catatan Bersama Pasangan</Text>
           <Text style={styles.sectionSub}>
@@ -352,6 +379,8 @@ export function NotesScreen(): React.JSX.Element {
             </ScrollView>
           </View>
         </Modal>
+      )}
+        </>
       )}
     </View>
   );
@@ -647,5 +676,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: COLORS.white,
+  },
+  subTabRow: {
+    flexDirection: 'row',
+    gap: SPACING.xs + 2,
+    marginBottom: SPACING.md,
+  },
+  subTabBtn: {
+    flex: 1,
+    backgroundColor: COLORS.warmSand,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: RADII.pill,
+    paddingVertical: 9,
+    alignItems: 'center',
+  },
+  subTabBtnActive: {
+    backgroundColor: COLORS.heroCocoa,
+    borderColor: COLORS.heroCocoa,
+  },
+  subTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  subTabTextActive: {
+    color: COLORS.textOnDark,
   },
 });

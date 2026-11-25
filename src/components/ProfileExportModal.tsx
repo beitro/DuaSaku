@@ -14,6 +14,7 @@ import {
 import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import { formatMonthLabel } from '../utils/format';
+import { useAppLockSettings } from './AppLockGate';
 
 export interface ProfileExportModalProps {
   visible: boolean;
@@ -37,6 +38,10 @@ export function ProfileExportModal({
   const [coupleName, setCoupleName] = useState('');
   const [partnerName, setPartnerName] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const { pinEnabled, setPin, disablePin, lockApp } = useAppLockSettings();
+  const [pinEditorOpen, setPinEditorOpen] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinNotice, setPinNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -175,6 +180,103 @@ export function ProfileExportModal({
                 <Text style={styles.exportJsonText}>Ekspor JSON</Text>
               </TouchableOpacity>
             </View>
+
+            <View style={styles.divider} />
+
+            <Text style={styles.sectionHeading}>Keamanan Aplikasi (PIN 4 Digit)</Text>
+            <Text style={styles.exportSub}>
+              {pinEnabled
+                ? 'Kunci PIN aktif. Perangkat akan meminta 4 digit PIN saat dibuka kembali.'
+                : 'Lindungi catatan keuangan pasangan dengan kunci PIN 4 digit.'}
+            </Text>
+
+            {!!pinNotice && (
+              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.sageDark, marginBottom: SPACING.xs }}>
+                {pinNotice}
+              </Text>
+            )}
+
+            {pinEditorOpen ? (
+              <View style={{ marginBottom: SPACING.sm }}>
+                <TextInput
+                  style={styles.input}
+                  value={pinInput}
+                  onChangeText={(txt) => setPinInput(txt.replace(/\D/g, '').slice(0, 4))}
+                  keyboardType="numeric"
+                  secureTextEntry
+                  maxLength={4}
+                  placeholder="Masukkan 4 digit PIN"
+                  placeholderTextColor={COLORS.textPlaceholder}
+                  testID="profile-pin-input"
+                />
+                <View style={styles.exportRow}>
+                  <TouchableOpacity
+                    style={[styles.exportBtn, styles.exportCsvBtn]}
+                    onPress={() => {
+                      const res = setPin(pinInput);
+                      if (!res.ok) {
+                        setFormError(res.error || 'PIN harus 4 digit angka.');
+                        return;
+                      }
+                      setPinInput('');
+                      setPinEditorOpen(false);
+                      setPinNotice('PIN 4 digit berhasil diaktifkan.');
+                    }}
+                    testID="profile-pin-save-btn"
+                  >
+                    <Text style={styles.exportCsvText}>Simpan PIN</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.exportBtn, styles.exportJsonBtn]}
+                    onPress={() => {
+                      setPinEditorOpen(false);
+                      setPinInput('');
+                    }}
+                  >
+                    <Text style={styles.exportJsonText}>Batal</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.exportRow}>
+                <TouchableOpacity
+                  style={[styles.exportBtn, styles.exportCsvBtn]}
+                  onPress={() => {
+                    setPinNotice(null);
+                    setPinEditorOpen(true);
+                  }}
+                  testID="profile-pin-setup-btn"
+                >
+                  <Text style={styles.exportCsvText}>
+                    {pinEnabled ? 'Ubah PIN' : 'Aktifkan PIN'}
+                  </Text>
+                </TouchableOpacity>
+                {pinEnabled && (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.exportBtn, styles.exportJsonBtn]}
+                      onPress={() => {
+                        onClose();
+                        lockApp();
+                      }}
+                      testID="profile-pin-lock-btn"
+                    >
+                      <Text style={styles.exportJsonText}>Kunci</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.exportBtn, styles.exportJsonBtn]}
+                      onPress={() => {
+                        disablePin();
+                        setPinNotice('PIN dimatikan.');
+                      }}
+                      testID="profile-pin-disable-btn"
+                    >
+                      <Text style={styles.exportJsonText}>Matikan</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            )}
 
             <View style={styles.footerRow}>
               <TouchableOpacity

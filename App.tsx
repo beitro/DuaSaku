@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +10,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { AppFrame } from './src/components/AppFrame';
+import { AppLockGate } from './src/components/AppLockGate';
 import { ConfirmModal } from './src/components/ConfirmModal';
 import { FeedbackBanner } from './src/components/FeedbackBanner';
 import { MonthSelector } from './src/components/MonthSelector';
@@ -64,6 +66,25 @@ function AppContent(): React.JSX.Element {
     logout,
   } = useDuaSaku();
   const [profileModalVisible, setProfileModalVisible] = useState(false);
+
+  useEffect(() => {
+    if (!token || !couple) return;
+    const handleDeepLink = (rawUrl: string | null | undefined) => {
+      if (!rawUrl || !rawUrl.includes('quick-add')) return;
+      const match = /[?&]type=(expense|income|transfer)/i.exec(rawUrl);
+      const kind = match ? match[1].toLowerCase() : 'expense';
+      if (kind === 'transfer') {
+        setActiveTab('accounts');
+      } else if (kind === 'income') {
+        openNewTransaction('income');
+      } else {
+        openNewTransaction('expense');
+      }
+    };
+    Linking.getInitialURL().then(handleDeepLink).catch(() => {});
+    const sub = Linking.addEventListener('url', (e) => handleDeepLink(e.url));
+    return () => sub.remove();
+  }, [token, couple, openNewTransaction, setActiveTab]);
 
   const handleLogoutPress = () => {
     requestConfirm({
@@ -322,7 +343,9 @@ function AppContent(): React.JSX.Element {
 export default function App(): React.JSX.Element {
   return (
     <DuaSakuProvider>
-      <AppContent />
+      <AppLockGate>
+        <AppContent />
+      </AppLockGate>
     </DuaSakuProvider>
   );
 }

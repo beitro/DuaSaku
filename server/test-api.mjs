@@ -1266,12 +1266,456 @@ try {
   const meCouple = await req('/api/couple', { token: loginA.token });
   assert.equal(meCouple.partners.length, 2);
 
+  // ==========================================================================
+  // Suite 10: Money Lover Features (Recurring, Debts, Presets, Receipt Parse, Bootstrap)
+  // ==========================================================================
+  const mlCouple = await req('/api/couples/create', {
+    method: 'POST',
+    body: { coupleName: 'Dompet Pintar', partnerName: 'Sari' },
+  });
+  createdCoupleIds.push(mlCouple.couple.id);
+  const mlToken = mlCouple.token;
+
+  const mlCats = await req('/api/categories', { token: mlToken });
+  const mlHomeCat = mlCats.find((c) => c.name.includes('Rumah Tangga'));
+  assert.ok(mlHomeCat);
+
+  const mlAcc = (
+    await req('/api/accounts', {
+      token: mlToken,
+      method: 'POST',
+      body: { name: 'BCA Bersama', accountType: 'bank', isShared: true, initialBalance: 1000000 },
+    })
+  ).account;
+
+  // --- 10A. Quick Presets (default seeded + CRUD + isolation) ---
+  const seededPresets = await req('/api/presets', { token: mlToken });
+  assert.equal(seededPresets.length, 3);
+  assert.ok(seededPresets.some((p) => p.label === 'Kopi Pagi' && p.amount === 25000));
+  assert.ok(seededPresets.some((p) => p.label === 'Makan Siang' && p.amount === 45000));
+  assert.ok(seededPresets.some((p) => p.label === 'Transportasi' && p.amount === 30000));
+
+  // Verify email-registered couple also receives seeded default presets
+  const regSeededPresets = await req('/api/presets', { token: loginA.token });
+  assert.equal(regSeededPresets.length, 3);
+
+  assert.equal((await reqStatus('/api/presets', { method: 'GET' })).status, 401);
+  assert.equal(
+    (await reqStatus('/api/presets', { token: mlToken, method: 'POST', body: { label: '   ', type: 'expense', amount: 10000 } })).status,
+    400
+  );
+  assert.equal(
+    (await reqStatus('/api/presets', { token: mlToken, method: 'POST', body: { label: 'Test', type: 'expense', amount: 0 } })).status,
+    400
+  );
+  assert.equal(
+    (await reqStatus('/api/presets', { token: mlToken, method: 'POST', body: { label: 'Test', type: 'transfer', amount: 10000 } })).status,
+    400
+  );
+  assert.equal(
+    (
+      await reqStatus('/api/presets', {
+        token: mlToken,
+        method: 'POST',
+        body: { label: 'Hijack Cat', type: 'expense', amount: 10000, categoryId: weddingCat.id },
+      })
+    ).status,
+    404
+  );
+
+  const customPreset = await req('/api/presets', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      label: 'Internet Rumah',
+      type: 'expense',
+      amount: 350000,
+      categoryId: mlHomeCat.id,
+      accountId: mlAcc.id,
+      note: 'WiFi bulanan',
+    },
+  });
+  assert.equal(customPreset.label, 'Internet Rumah');
+  assert.equal(customPreset.amount, 350000);
+  assert.equal(customPreset.categoryId, mlHomeCat.id);
+  assert.equal(customPreset.accountId, mlAcc.id);
+
+  assert.equal((await reqStatus(`/api/presets/${customPreset.id}`, { token: partnerC.token, method: 'DELETE' })).status, 404);
+  const delPreset = await req(`/api/presets/${customPreset.id}`, { token: mlToken, method: 'DELETE' });
+  assert.equal(delPreset.ok, true);
+  assert.equal((await req('/api/presets', { token: mlToken })).length, 3);
+
+  // --- 10B. Recurring Rules CRUD, Validation, 409 Category Guard, & Pay + Date Advance ---
+  assert.equal((await reqStatus('/api/recurring', { method: 'GET' })).status, 401);
+  assert.equal(
+    (
+      await reqStatus('/api/recurring', {
+        token: mlToken,
+        method: 'POST',
+        body: { title: 'WiFi', type: 'expense', amount: -500, categoryId: mlHomeCat.id, frequency: 'monthly' },
+      })
+    ).status,
+    400
+  );
+  assert.equal(
+    (
+      await reqStatus('/api/recurring', {
+        token: mlToken,
+        method: 'POST',
+        body: { title: 'WiFi', type: 'bad', amount: 100000, categoryId: mlHomeCat.id, frequency: 'monthly' },
+      })
+    ).status,
+    400
+  );
+  assert.equal(
+    (
+      await reqStatus('/api/recurring', {
+        token: mlToken,
+        method: 'POST',
+        body: { title: 'WiFi', type: 'expense', amount: 100000, categoryId: mlHomeCat.id, frequency: 'daily' },
+      })
+    ).status,
+    400
+  );
+  assert.equal(
+    (
+      await reqStatus('/api/recurring', {
+        token: mlToken,
+        method: 'POST',
+        body: {
+          title: 'WiFi',
+          type: 'expense',
+          amount: 100000,
+          categoryId: mlHomeCat.id,
+          frequency: 'monthly',
+          nextDueDate: '2026-02-30',
+        },
+      })
+    ).status,
+    400
+  );
+  assert.equal(
+    (
+      await reqStatus('/api/recurring', {
+        token: mlToken,
+        method: 'POST',
+        body: { title: 'WiFi', type: 'expense', amount: 100000, categoryId: weddingCat.id, frequency: 'monthly' },
+      })
+    ).status,
+    404
+  );
+  assert.equal(
+    (
+      await reqStatus('/api/recurring', {
+        token: mlToken,
+        method: 'POST',
+        body: {
+          title: 'WiFi',
+          type: 'expense',
+          amount: 100000,
+          categoryId: mlHomeCat.id,
+          accountId: cashAcc.id,
+          frequency: 'monthly',
+        },
+      })
+    ).status,
+    404
+  );
+
+  const recCat = await req('/api/categories', {
+    token: mlToken,
+    method: 'POST',
+    body: { name: 'Tagihan Rutin', icon: '⚡' },
+  });
+
+  const monthlyRule = await req('/api/recurring', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      title: 'Listrik & Internet',
+      type: 'expense',
+      amount: 250000,
+      categoryId: recCat.id,
+      accountId: mlAcc.id,
+      frequency: 'monthly',
+      nextDueDate: '2026-01-31',
+    },
+  });
+  assert.equal(monthlyRule.active, true);
+  assert.equal(monthlyRule.nextDueDate, '2026-01-31');
+
+  const weeklyRule = await req('/api/recurring', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      title: 'Uang Belanja Mingguan',
+      type: 'income',
+      amount: 500000,
+      categoryId: recCat.id,
+      accountId: mlAcc.id,
+      frequency: 'weekly',
+      nextDueDate: '2026-11-01',
+    },
+  });
+
+  const yearlyRule = await req('/api/recurring', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      title: 'Pajak Tahunan',
+      type: 'expense',
+      amount: 300000,
+      categoryId: recCat.id,
+      frequency: 'yearly',
+      nextDueDate: '2024-02-29',
+    },
+  });
+
+  const recList = await req('/api/recurring', { token: mlToken });
+  assert.equal(recList.length, 3);
+
+  // Category referenced by recurring rule -> 409 on DELETE
+  assert.equal((await reqStatus(`/api/categories/${recCat.id}`, { token: mlToken, method: 'DELETE' })).status, 409);
+
+  // PATCH toggle active (explicit + empty body toggle) & update fields
+  const pausedRule = await req(`/api/recurring/${monthlyRule.id}`, {
+    token: mlToken,
+    method: 'PATCH',
+    body: { active: false, title: 'Listrik PLN & Biznet', amount: 275000 },
+  });
+  assert.equal(pausedRule.active, false);
+  assert.equal(pausedRule.title, 'Listrik PLN & Biznet');
+  assert.equal(pausedRule.amount, 275000);
+
+  const resumedRule = await req(`/api/recurring/${monthlyRule.id}`, {
+    token: mlToken,
+    method: 'PATCH',
+    body: {},
+  });
+  assert.equal(resumedRule.active, true);
+
+  // Cross-couple isolation on recurring
+  assert.equal((await reqStatus(`/api/recurring/${monthlyRule.id}`, { token: partnerC.token, method: 'PATCH', body: { active: false } })).status, 404);
+  assert.equal((await reqStatus(`/api/recurring/${monthlyRule.id}/pay`, { token: partnerC.token, method: 'POST', body: {} })).status, 404);
+  assert.equal((await reqStatus(`/api/recurring/${monthlyRule.id}`, { token: partnerC.token, method: 'DELETE' })).status, 404);
+
+  // Pay monthly rule (2026-01-31 -> 2026-02-28 clamping check) with explicit date in 2026-11
+  const payMonthly = await req(`/api/recurring/${monthlyRule.id}/pay`, {
+    token: mlToken,
+    method: 'POST',
+    body: { date: '2026-11-10T10:00:00.000Z' },
+  });
+  assert.equal(payMonthly.transaction.amount, 275000);
+  assert.equal(payMonthly.transaction.type, 'expense');
+  assert.equal(payMonthly.transaction.accountId, mlAcc.id);
+  assert.equal(payMonthly.rule.nextDueDate, '2026-02-28');
+
+  // Pay weekly income rule (2026-11-01 -> 2026-11-08)
+  const payWeekly = await req(`/api/recurring/${weeklyRule.id}/pay`, {
+    token: mlToken,
+    method: 'POST',
+    body: { date: '2026-11-12' },
+  });
+  assert.equal(payWeekly.transaction.type, 'income');
+  assert.equal(payWeekly.rule.nextDueDate, '2026-11-08');
+
+  // Pay yearly leap-day rule (2024-02-29 -> 2025-02-28) without explicit date
+  const payYearly = await req(`/api/recurring/${yearlyRule.id}/pay`, {
+    token: mlToken,
+    method: 'POST',
+    body: {},
+  });
+  assert.equal(payYearly.rule.nextDueDate, '2025-02-28');
+
+  // Check account balance: 1,000,000 - 275,000 + 500,000 = 1,225,000
+  const mlAccsAfterPay = await req('/api/accounts', { token: mlToken });
+  assert.equal(mlAccsAfterPay.accounts.find((a) => a.id === mlAcc.id).balance, 1225000);
+
+  // Delete yearly rule cleanly
+  assert.equal((await req(`/api/recurring/${yearlyRule.id}`, { token: mlToken, method: 'DELETE' })).ok, true);
+  assert.equal((await req('/api/recurring', { token: mlToken })).length, 2);
+
+  // --- 10C. Debt / Loan & Split Tracking ---
+  assert.equal((await reqStatus('/api/debts', { method: 'GET' })).status, 401);
+  assert.equal(
+    (await reqStatus('/api/debts', { token: mlToken, method: 'POST', body: { personName: '  ', direction: 'payable', amount: 50000 } })).status,
+    400
+  );
+  assert.equal(
+    (await reqStatus('/api/debts', { token: mlToken, method: 'POST', body: { personName: 'Budi', direction: 'other', amount: 50000 } })).status,
+    400
+  );
+  assert.equal(
+    (await reqStatus('/api/debts', { token: mlToken, method: 'POST', body: { personName: 'Budi', direction: 'payable', amount: -1 } })).status,
+    400
+  );
+  assert.equal(
+    (
+      await reqStatus('/api/debts', {
+        token: mlToken,
+        method: 'POST',
+        body: { personName: 'Budi', direction: 'payable', amount: 50000, dueDate: '2026-13-01' },
+      })
+    ).status,
+    400
+  );
+
+  const debt1 = await req('/api/debts', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      personName: 'Andi',
+      direction: 'receivable',
+      amount: 200000,
+      note: 'Patungan makan malam',
+      dueDate: '2026-12-01',
+    },
+  });
+  assert.equal(debt1.paidAmount, 0);
+  assert.equal(debt1.remainingAmount, 200000);
+  assert.equal(debt1.settled, false);
+
+  const debt2 = await req('/api/debts', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      personName: 'Citra',
+      direction: 'payable',
+      amount: 120000,
+      note: 'Talangan tiket bioskop',
+    },
+  });
+  assert.equal(debt2.dueDate, null);
+
+  assert.equal((await req('/api/debts', { token: mlToken })).length, 2);
+
+  // Partial settle (75,000) -> still unsettled
+  const partialSettle = await req(`/api/debts/${debt1.id}/settle`, {
+    token: mlToken,
+    method: 'POST',
+    body: { amount: 75000 },
+  });
+  assert.equal(partialSettle.paidAmount, 75000);
+  assert.equal(partialSettle.remainingAmount, 125000);
+  assert.equal(partialSettle.settled, false);
+
+  // Invalid settle amount -> 400
+  assert.equal(
+    (await reqStatus(`/api/debts/${debt1.id}/settle`, { token: mlToken, method: 'POST', body: { amount: 0 } })).status,
+    400
+  );
+
+  // Default settle (no amount -> settles remaining 125,000)
+  const fullSettle = await req(`/api/debts/${debt1.id}/settle`, {
+    token: mlToken,
+    method: 'POST',
+    body: {},
+  });
+  assert.equal(fullSettle.paidAmount, 200000);
+  assert.equal(fullSettle.remainingAmount, 0);
+  assert.equal(fullSettle.settled, true);
+
+  // Already settled -> 400
+  assert.equal(
+    (await reqStatus(`/api/debts/${debt1.id}/settle`, { token: mlToken, method: 'POST', body: {} })).status,
+    400
+  );
+
+  // Cross-couple isolation & delete
+  assert.equal((await reqStatus(`/api/debts/${debt2.id}/settle`, { token: partnerC.token, method: 'POST', body: {} })).status, 404);
+  assert.equal((await reqStatus(`/api/debts/${debt2.id}`, { token: partnerC.token, method: 'DELETE' })).status, 404);
+  assert.equal((await req(`/api/debts/${debt2.id}`, { token: mlToken, method: 'DELETE' })).ok, true);
+  assert.equal((await req('/api/debts', { token: mlToken })).length, 1);
+
+  // --- 10D. Receipt Text Parser & Category Auto-Suggest ---
+  assert.equal((await reqStatus('/api/receipts/parse', { method: 'POST', body: { text: 'Test' } })).status, 401);
+  assert.equal((await reqStatus('/api/receipts/parse', { token: mlToken, method: 'POST', body: { text: '   ' } })).status, 400);
+
+  // Add custom categories to test targeted matching
+  const coffeeFoodCat = await req('/api/categories', {
+    token: mlToken,
+    method: 'POST',
+    body: { name: 'Makan & Kopi', icon: '☕' },
+  });
+  const transportCat = await req('/api/categories', {
+    token: mlToken,
+    method: 'POST',
+    body: { name: 'Transportasi', icon: '🛵' },
+  });
+  const healthCat = await req('/api/categories', {
+    token: mlToken,
+    method: 'POST',
+    body: { name: 'Kesehatan', icon: '💊' },
+  });
+
+  const parsedCoffee = await req('/api/receipts/parse', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      text: '=== KOPI KENANGAN ===\nEs Kopi Susu Mantan 1x Rp 24.000\nGrand Total Rp 24.000\nTunai Rp 50.000\nKembali Rp 26.000',
+    },
+  });
+  assert.equal(parsedCoffee.merchant, 'KOPI KENANGAN');
+  assert.equal(parsedCoffee.amount, 24000);
+  assert.equal(parsedCoffee.suggestedCategoryId, coffeeFoodCat.id);
+  assert.equal(parsedCoffee.suggestedCategoryName, coffeeFoodCat.name);
+
+  const parsedTransport = await req('/api/receipts/parse', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      text: 'GOJEK INDONESIA\nGoCar Sudirman - Kemang\n2026-11-25 18:30\nTotal Bayar IDR 68,500',
+    },
+  });
+  assert.equal(parsedTransport.merchant, 'GOJEK INDONESIA');
+  assert.equal(parsedTransport.amount, 68500);
+  assert.equal(parsedTransport.suggestedCategoryId, transportCat.id);
+
+  const parsedPharmacy = await req('/api/receipts/parse', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      text: 'APOTEK KIMIA FARMA\nVitamin C 1000mg Rp 85.000\nTotal Belanja Rp 85.000,00',
+    },
+  });
+  assert.equal(parsedPharmacy.merchant, 'APOTEK KIMIA FARMA');
+  assert.equal(parsedPharmacy.amount, 85000);
+  assert.equal(parsedPharmacy.suggestedCategoryId, healthCat.id);
+
+  const parsedPln = await req('/api/receipts/parse', {
+    token: mlToken,
+    method: 'POST',
+    body: {
+      text: 'PLN LISTRIK PASCABAYAR\nTagihan Listrik Bulan Nov\nTotal Rp 420.000,-',
+    },
+  });
+  assert.equal(parsedPln.amount, 420000);
+  assert.ok(parsedPln.suggestedCategoryId !== null);
+
+  // --- 10E. Bootstrap Endpoint (/api/bootstrap) ---
+  assert.equal((await reqStatus('/api/bootstrap')).status, 401);
+  assert.equal((await reqStatus('/api/bootstrap?month=bad', { token: mlToken })).status, 400);
+
+  const bootstrapRes = await req('/api/bootstrap?month=2026-11&tzOffset=420', { token: mlToken });
+  assert.equal(bootstrapRes.month, '2026-11');
+  assert.equal(bootstrapRes.couple.id, mlCouple.couple.id);
+  assert.equal(bootstrapRes.categories.length, 8);
+  assert.equal(bootstrapRes.accounts.length, 1);
+  assert.equal(bootstrapRes.accountTotals.totalBalance, 1225000);
+  assert.equal(bootstrapRes.recurringRules.length, 2);
+  assert.equal(bootstrapRes.debtLoans.length, 1);
+  assert.equal(bootstrapRes.debtLoans[0].settled, true);
+  assert.equal(bootstrapRes.quickPresets.length, 3);
+  assert.ok(bootstrapRes.transactions.length >= 2);
+  assert.equal(bootstrapRes.summary.month, '2026-11');
+  assert.equal(bootstrapRes.analytics.month, '2026-11');
+
   console.log(
     JSON.stringify(
       {
         ok: true,
         storage: health.storage,
-        suitesPassed: 9,
+        suitesPassed: 10,
         novSummary: {
           totalIncome: novSummary.totalIncome,
           totalExpense: novSummary.totalExpense,
@@ -1280,6 +1724,11 @@ try {
         accountsOverview: novAnalytics.accountsOverview,
         notesCount: notesAfterRename.length,
         transfersCount: transferList.transfers.length,
+        moneyLoverBootstrap: {
+          recurringRules: bootstrapRes.recurringRules.length,
+          debtLoans: bootstrapRes.debtLoans.length,
+          quickPresets: bootstrapRes.quickPresets.length,
+        },
       },
       null,
       2
