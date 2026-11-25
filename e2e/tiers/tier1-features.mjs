@@ -60,13 +60,20 @@ async function importTsFresh(relPath) {
 }
 
 async function createCoupleInBrowser(cdp, webUrl, coupleName = 'Dompet E2E', partnerName = 'Raka') {
+  const email = `${partnerName.toLowerCase().replace(/[^a-z0-9]/g, '')}.${Date.now()}.${Math.floor(Math.random() * 10000)}@duasaku.test`;
   await cdp.navigate(webUrl);
   await cdp.clearStorage();
   await cdp.reload();
+  await cdp.waitForText('Buat Akun');
+  await cdp.clickByText('Buat Akun', { exact: true });
+  await cdp.waitForText('Lanjut Pilih Ruang');
+  await cdp.fillInput('Contoh: Raka atau Nadia', partnerName);
+  await cdp.fillInput('nama@email.com', email);
+  await cdp.fillInput('Minimal 6 karakter', 'duasaku123');
+  await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
   await cdp.waitForText('Buat Ruang Baru');
-  await cdp.fillInput('Dompet Masa Depan', coupleName);
-  await cdp.fillInput('Raka / Nadia', partnerName);
-  await cdp.clickByText(/Mulai & Dapatkan Kode Undangan|Mulai Sekarang|^Buat Ruang$/i);
+  await cdp.fillInput('Contoh: Dompet Masa Depan', coupleName);
+  await cdp.clickByText('Buat Akun & Mulai Ruang', { exact: true });
   await cdp.waitForText(coupleName);
   await cdp.waitForText(/Ringkas/);
 }
@@ -178,7 +185,7 @@ export function getTier1Tests() {
         await cdp.navigate(webUrl);
         await cdp.clearStorage();
         await cdp.reload();
-        await cdp.waitForText('Buat Ruang Baru');
+        await cdp.waitForText('Buat Akun');
 
         const onboardingAudit = await cdp.getDomAudit();
         const rootRgb = parseColor(onboardingAudit.bodyBg);
@@ -1278,7 +1285,7 @@ export function getTier1Tests() {
         await cdp.waitForText('DUASAKU');
 
         const bootText = await cdp.getBodyText();
-        assert(bootText.includes('Buat Ruang Baru') && bootText.includes('Gabung Pasangan'));
+        assert(bootText.includes('Buat Akun') && bootText.includes('Masuk'));
 
         await createCoupleInBrowser(cdp, webUrl, 'Web Parity', 'Raka');
         const shellText = await cdp.getBodyText();
@@ -1302,11 +1309,13 @@ export function getTier1Tests() {
         await cdp.navigate(webUrl);
         await cdp.clearStorage();
         await cdp.reload();
-        await cdp.waitForText('Buat Ruang Baru');
+        await cdp.waitForText('Buat Akun');
+        await cdp.clickByText('Buat Akun', { exact: true });
+        await cdp.waitForText('Lanjut Pilih Ruang');
 
-        // Trigger invalid 1-char partner name -> FeedbackBanner must display error inline
-        await cdp.fillInput('Raka / Nadia', 'A');
-        await cdp.clickByText(/Mulai & Dapatkan Kode Undangan|Mulai Sekarang|^Buat Ruang$/i);
+        // Trigger invalid 1-char partner name -> inline error must display
+        await cdp.fillInput('Contoh: Raka atau Nadia', 'A');
+        await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
         await cdp.waitForText(/minimal 2|karakter|Validasi/i);
 
         // Create couple, add tx, test ConfirmModal cancel & confirm delete

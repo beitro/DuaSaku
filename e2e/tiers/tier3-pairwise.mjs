@@ -13,13 +13,20 @@ import {
 import { contrastRatio, parseColor } from '../lib/wcag.mjs';
 
 async function createCoupleViaUi(cdp, webUrl, coupleName = 'Pasangan Pairwise', partnerName = 'Raka') {
+  const email = `${partnerName.toLowerCase().replace(/[^a-z0-9]/g, '')}.${Date.now()}.${Math.floor(Math.random() * 10000)}@duasaku.test`;
   await cdp.navigate(webUrl);
   await cdp.clearStorage();
   await cdp.reload();
+  await cdp.waitForText('Buat Akun');
+  await cdp.clickByText('Buat Akun', { exact: true });
+  await cdp.waitForText('Lanjut Pilih Ruang');
+  await cdp.fillInput('Contoh: Raka atau Nadia', partnerName);
+  await cdp.fillInput('nama@email.com', email);
+  await cdp.fillInput('Minimal 6 karakter', 'duasaku123');
+  await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
   await cdp.waitForText('Buat Ruang Baru');
-  await cdp.fillInput('Dompet Masa Depan', coupleName);
-  await cdp.fillInput('Raka / Nadia', partnerName);
-  await cdp.clickByText(/Mulai & Dapatkan Kode Undangan|Mulai Sekarang|^Buat Ruang$/i);
+  await cdp.fillInput('Contoh: Dompet Masa Depan', coupleName);
+  await cdp.clickByText('Buat Akun & Mulai Ruang', { exact: true });
   await cdp.waitForText(coupleName);
   await cdp.waitForText(/Ringkas/);
 }
@@ -302,9 +309,11 @@ export function getTier3Tests() {
           await cdp.navigate(webUrl);
           await cdp.clearStorage();
           await cdp.reload();
-          await cdp.waitForText('Buat Ruang Baru');
-          await cdp.fillInput('Raka / Nadia', 'X');
-          await cdp.clickByText(/Mulai & Dapatkan Kode Undangan|Mulai Sekarang|^Buat Ruang$/i);
+          await cdp.waitForText('Buat Akun');
+          await cdp.clickByText('Buat Akun', { exact: true });
+          await cdp.waitForText('Lanjut Pilih Ruang');
+          await cdp.fillInput('Contoh: Raka atau Nadia', 'X');
+          await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
           await cdp.waitForText(/minimal 2|karakter/i);
           const audit = await cdp.getDomAudit();
           assertEqual(audit.contrastFailures.length, 0, `Banner contrast failure at ${w}x${h}: ${JSON.stringify(audit.contrastFailures)}`);

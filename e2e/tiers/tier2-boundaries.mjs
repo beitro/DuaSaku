@@ -63,13 +63,20 @@ async function seedAndLoginBrowser(cdp, webUrl, apiUrl, { coupleName = 'Boundary
 }
 
 async function createCoupleViaUi(cdp, webUrl, coupleName = 'Uji Batas', partnerName = 'Raka') {
+  const email = `${partnerName.toLowerCase().replace(/[^a-z0-9]/g, '')}.${Date.now()}.${Math.floor(Math.random() * 10000)}@duasaku.test`;
   await cdp.navigate(webUrl);
   await cdp.clearStorage();
   await cdp.reload();
+  await cdp.waitForText('Buat Akun');
+  await cdp.clickByText('Buat Akun', { exact: true });
+  await cdp.waitForText('Lanjut Pilih Ruang');
+  await cdp.fillInput('Contoh: Raka atau Nadia', partnerName);
+  await cdp.fillInput('nama@email.com', email);
+  await cdp.fillInput('Minimal 6 karakter', 'duasaku123');
+  await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
   await cdp.waitForText('Buat Ruang Baru');
-  await cdp.fillInput('Dompet Masa Depan', coupleName);
-  await cdp.fillInput('Raka / Nadia', partnerName);
-  await cdp.clickByText(/Mulai & Dapatkan Kode Undangan|Mulai Sekarang|^Buat Ruang$/i);
+  await cdp.fillInput('Contoh: Dompet Masa Depan', coupleName);
+  await cdp.clickByText('Buat Akun & Mulai Ruang', { exact: true });
   await cdp.waitForText(coupleName);
   await cdp.waitForText(/Ringkas/);
 }
@@ -301,7 +308,9 @@ export function getTier2Tests() {
         await cdp.navigate(webUrl);
         await cdp.clearStorage();
         await cdp.reload();
-        await cdp.waitForText('Buat Ruang Baru');
+        await cdp.waitForText('Buat Akun');
+        await cdp.clickByText('Buat Akun');
+        await cdp.waitForText('Kenalan Dulu, Yuk');
         await auditVisibleInputs('Onboarding', 2);
 
         await createCoupleViaUi(cdp, webUrl, 'Audit Input', 'Raka');
@@ -1301,7 +1310,7 @@ export function getTier2Tests() {
           }
         });
         await cdp.reload();
-        await cdp.waitForText('Buat Ruang Baru');
+        await cdp.waitForText('Buat Akun');
         const errs = cdp.getErrors();
         assertEqual(errs.exceptions.length, 0, `Uncaught exceptions during token recovery: ${JSON.stringify(errs.exceptions)}`);
       },
@@ -1350,7 +1359,7 @@ export function getTier2Tests() {
 
         try {
           await cdp.navigate(webUrl);
-          await cdp.waitForText('Buat Ruang Baru');
+          await cdp.waitForText('Buat Akun');
 
           const blocked = await cdp.evalFn(() => {
             try {
@@ -1362,9 +1371,15 @@ export function getTier2Tests() {
           });
           assert(blocked?.threw && blocked.name === 'SecurityError', `Expected localStorage to throw SecurityError, got ${JSON.stringify(blocked)}`);
 
-          await cdp.fillInput('Dompet Masa Depan', 'Memori Aman');
-          await cdp.fillInput('Raka / Nadia', 'Raka');
-          await cdp.clickByText(/Mulai & Dapatkan Kode Undangan|Mulai Sekarang|^Buat Ruang$/i);
+          await cdp.clickByText('Buat Akun', { exact: true });
+          await cdp.waitForText('Lanjut Pilih Ruang');
+          await cdp.fillInput('Contoh: Raka atau Nadia', 'Raka');
+          await cdp.fillInput('nama@email.com', `raka.mem.${Date.now()}@duasaku.test`);
+          await cdp.fillInput('Minimal 6 karakter', 'duasaku123');
+          await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
+          await cdp.waitForText('Buat Ruang Baru');
+          await cdp.fillInput('Contoh: Dompet Masa Depan', 'Memori Aman');
+          await cdp.clickByText('Buat Akun & Mulai Ruang', { exact: true });
           await cdp.waitForText('Memori Aman');
           await cdp.waitForText(/Ringkas/);
 

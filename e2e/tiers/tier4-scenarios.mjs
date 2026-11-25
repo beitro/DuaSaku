@@ -14,13 +14,20 @@ import {
 } from '../lib/harness.mjs';
 
 async function createCoupleViaUi(cdp, webUrl, coupleName = 'Pasangan Nyata', partnerName = 'Raka') {
+  const email = `${partnerName.toLowerCase().replace(/[^a-z0-9]/g, '')}.${Date.now()}.${Math.floor(Math.random() * 10000)}@duasaku.test`;
   await cdp.navigate(webUrl);
   await cdp.clearStorage();
   await cdp.reload();
+  await cdp.waitForText('Buat Akun');
+  await cdp.clickByText('Buat Akun', { exact: true });
+  await cdp.waitForText('Lanjut Pilih Ruang');
+  await cdp.fillInput('Contoh: Raka atau Nadia', partnerName);
+  await cdp.fillInput('nama@email.com', email);
+  await cdp.fillInput('Minimal 6 karakter', 'duasaku123');
+  await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
   await cdp.waitForText('Buat Ruang Baru');
-  await cdp.fillInput('Dompet Masa Depan', coupleName);
-  await cdp.fillInput('Raka / Nadia', partnerName);
-  await cdp.clickByText(/Mulai & Dapatkan Kode Undangan|Mulai Sekarang|^Buat Ruang$/i);
+  await cdp.fillInput('Contoh: Dompet Masa Depan', coupleName);
+  await cdp.clickByText('Buat Akun & Mulai Ruang', { exact: true });
   await cdp.waitForText(coupleName);
   await cdp.waitForText(/Ringkas/);
 }
@@ -319,17 +326,23 @@ export function getTier4Tests() {
         await cdp.navigate(webUrl);
         await cdp.clearStorage();
         await cdp.reload();
-        await cdp.waitForText('Buat Ruang Baru');
+        await cdp.waitForText('Buat Akun');
+        await cdp.clickByText('Buat Akun', { exact: true });
+        await cdp.waitForText('Lanjut Pilih Ruang');
 
         // 1-char error feedback banner (no Alert.alert)
-        await cdp.fillInput('Raka / Nadia', 'A');
-        await cdp.clickByText(/Mulai & Dapatkan Kode Undangan|Mulai Sekarang|^Buat Ruang$/i);
+        await cdp.fillInput('Contoh: Raka atau Nadia', 'A');
+        await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
         await cdp.waitForText(/minimal 2|karakter/i);
 
-        // Partner A creates couple
-        await cdp.fillInput('Dompet Masa Depan', 'Rumah Raka Nadia');
-        await cdp.fillInput('Raka / Nadia', 'Raka');
-        await cdp.clickByText(/Mulai & Dapatkan Kode Undangan|Mulai Sekarang|^Buat Ruang$/i);
+        // Partner A registers and creates couple
+        await cdp.fillInput('Contoh: Raka atau Nadia', 'Raka');
+        await cdp.fillInput('nama@email.com', `raka.t4.${Date.now()}@duasaku.test`);
+        await cdp.fillInput('Minimal 6 karakter', 'duasaku123');
+        await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
+        await cdp.waitForText('Buat Ruang Baru');
+        await cdp.fillInput('Contoh: Dompet Masa Depan', 'Rumah Raka Nadia');
+        await cdp.clickByText('Buat Akun & Mulai Ruang', { exact: true });
         await cdp.waitForText('Rumah Raka Nadia');
 
         const headerText = await cdp.getBodyText();
@@ -344,15 +357,21 @@ export function getTier4Tests() {
         await cdp.reload();
         await cdp.waitForText('Rumah Raka Nadia');
 
-        // Partner B joins in clean storage
+        // Partner B registers & joins in clean storage
         await cdp.clearStorage();
         await cdp.reload();
+        await cdp.waitForText('Buat Akun');
+        await cdp.clickByText('Buat Akun', { exact: true });
+        await cdp.waitForText('Lanjut Pilih Ruang');
+        await cdp.fillInput('Contoh: Raka atau Nadia', 'Nadia');
+        await cdp.fillInput('nama@email.com', `nadia.t4.${Date.now()}@duasaku.test`);
+        await cdp.fillInput('Minimal 6 karakter', 'duasaku123');
+        await cdp.clickByText('Lanjut Pilih Ruang', { exact: true });
         await cdp.waitForText('Gabung Pasangan');
         await cdp.clickByText('Gabung Pasangan', { exact: true });
         await cdp.waitForText(/Kode Undangan|A1B2C3/i);
         await cdp.fillInput(/A1B2C3|Kode Undangan/i, inviteCode);
-        await cdp.fillInput('Raka / Nadia', 'Nadia');
-        await cdp.clickByText('Gabung Sekarang');
+        await cdp.clickByText('Buat Akun & Gabung Ruang', { exact: true });
         await cdp.waitForText('Rumah Raka Nadia');
         await cdp.waitForText(/Nadia/);
 
