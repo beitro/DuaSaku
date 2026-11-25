@@ -103,3 +103,12 @@ CREATE TABLE IF NOT EXISTS account_transfers (
 
 CREATE INDEX IF NOT EXISTS idx_account_transfers_couple_occurred
   ON account_transfers(couple_id, occurred_at DESC);
+
+ALTER TABLE partners
+  ADD COLUMN IF NOT EXISTS email TEXT;
+
+ALTER TABLE partners
+  ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_partners_email_lower
+  ON partners(LOWER(email)) WHERE email IS NOT NULL;

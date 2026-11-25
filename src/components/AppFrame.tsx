@@ -17,7 +17,7 @@ export interface AppFrameProps {
 
 export function AppFrame({
   children,
-  maxWidth = 720,
+  maxWidth = 420,
   backgroundColor = COLORS.bgCream,
 }: AppFrameProps): React.JSX.Element {
   const { width } = useWindowDimensions();
@@ -44,7 +44,12 @@ export function AppFrame({
             alignSelf: 'center',
             borderLeftWidth: 1,
             borderRightWidth: 1,
-            borderColor: COLORS.border,
+            borderColor: COLORS.borderStrong,
+            shadowColor: '#2C211B',
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.1,
+            shadowRadius: 24,
+            elevation: 6,
           },
         ]}
       >

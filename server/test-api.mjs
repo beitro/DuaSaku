@@ -1192,12 +1192,86 @@ try {
   assert.equal(coupleOnlyRes.couple.coupleName, 'Dompet Dina');
   assert.equal(coupleOnlyRes.partner.name, 'Dina Larasati');
 
+  // ==========================================================================
+  // Suite 9: Email & Password Auth (/api/auth/register & /api/auth/login)
+  // ==========================================================================
+  const uniqueSuffix = Date.now();
+  const emailA = `raka.${uniqueSuffix}@duasaku.test`;
+  const emailB = `nadia.${uniqueSuffix}@duasaku.test`;
+
+  const badEmailReg = await reqStatus('/api/auth/register', {
+    method: 'POST',
+    body: { email: 'not-an-email', password: 'password123', partnerName: 'Raka', mode: 'create' },
+  });
+  assert.equal(badEmailReg.status, 400);
+
+  const shortPwdReg = await reqStatus('/api/auth/register', {
+    method: 'POST',
+    body: { email: emailA, password: '123', partnerName: 'Raka', mode: 'create' },
+  });
+  assert.equal(shortPwdReg.status, 400);
+
+  const regA = await req('/api/auth/register', {
+    method: 'POST',
+    body: {
+      email: emailA,
+      password: 'secret-password-A',
+      partnerName: 'Raka Auth',
+      coupleName: 'Ruang Auth',
+      mode: 'create',
+    },
+  });
+  createdCoupleIds.push(regA.couple.id);
+  assert.equal(regA.partner.roleLabel, 'Partner A');
+  assert.ok(regA.token);
+
+  const dupEmailReg = await reqStatus('/api/auth/register', {
+    method: 'POST',
+    body: {
+      email: emailA.toUpperCase(),
+      password: 'secret-password-A',
+      partnerName: 'Raka Dup',
+      mode: 'create',
+    },
+  });
+  assert.equal(dupEmailReg.status, 409);
+
+  const regB = await req('/api/auth/register', {
+    method: 'POST',
+    body: {
+      email: emailB,
+      password: 'secret-password-B',
+      partnerName: 'Nadia Auth',
+      inviteCode: regA.couple.inviteCode,
+      mode: 'join',
+    },
+  });
+  assert.equal(regB.couple.id, regA.couple.id);
+  assert.equal(regB.partner.roleLabel, 'Partner B');
+
+  const wrongLogin = await reqStatus('/api/auth/login', {
+    method: 'POST',
+    body: { email: emailA, password: 'wrong-password' },
+  });
+  assert.equal(wrongLogin.status, 401);
+
+  const loginA = await req('/api/auth/login', {
+    method: 'POST',
+    body: { email: emailA.toUpperCase(), password: 'secret-password-A' },
+  });
+  assert.equal(loginA.partner.id, regA.partner.id);
+  assert.equal(loginA.couple.id, regA.couple.id);
+  assert.ok(loginA.token);
+
+  const meCouple = await req('/api/couple', { token: loginA.token });
+  assert.equal(meCouple.partners.length, 2);
+
   console.log(
     JSON.stringify(
       {
         ok: true,
         storage: health.storage,
-        suitesPassed: 8,
+        suitesPassed: 9,
         novSummary: {
           totalIncome: novSummary.totalIncome,
           totalExpense: novSummary.totalExpense,

@@ -12,6 +12,7 @@ import type { FeedbackKind, FeedbackState } from '../components/FeedbackBanner';
 import type {
   AccountTotals,
   AccountTransfer,
+  AuthResponse,
   CategoryGoal,
   CoupleAccount,
   CoupleSpace,
@@ -127,6 +128,15 @@ export interface DuaSakuContextValue {
   closeQuickEntry: () => void;
 
   // API Actions
+  registerAccount: (payload: {
+    email: string;
+    password: string;
+    partnerName: string;
+    mode: 'create' | 'join';
+    coupleName?: string;
+    inviteCode?: string;
+  }) => Promise<void>;
+  loginAccount: (email: string, password: string) => Promise<void>;
   createCouple: (coupleName: string, partnerName: string) => Promise<void>;
   joinCouple: (inviteCode: string, partnerName: string) => Promise<void>;
   updateCoupleProfile: (payload: UpdateCouplePayload) => Promise<UpdateCoupleResponse>;
@@ -426,19 +436,76 @@ export function DuaSakuProvider({
     }
   }, [clearFeedback, selectedMonth, showError, syncAll, token]);
 
+  const applyAuthSession = useCallback(
+    async (res: AuthResponse, successMsg: string) => {
+      const nextCouple = { ...res.couple, partners: [res.partner] };
+      saveSession(res.token, res.partner, nextCouple);
+      setCouple(nextCouple);
+      setMe(res.partner);
+      setToken(res.token);
+      setActiveTab('dashboard');
+      await syncAll(res.token, selectedMonth);
+      showSuccess(successMsg);
+    },
+    [selectedMonth, showSuccess, syncAll]
+  );
+
+  const registerAccount = useCallback(
+    async (payload: {
+      email: string;
+      password: string;
+      partnerName: string;
+      mode: 'create' | 'join';
+      coupleName?: string;
+      inviteCode?: string;
+    }) => {
+      setLoading(true);
+      try {
+        const res = await duaSakuApi.register({
+          ...payload,
+          email: payload.email.trim(),
+          partnerName: payload.partnerName.trim(),
+          coupleName: payload.coupleName?.trim(),
+          inviteCode: payload.inviteCode?.trim().toUpperCase(),
+        });
+        await applyAuthSession(
+          res,
+          payload.mode === 'join'
+            ? `Akun terdaftar & bergabung ke "${res.couple.coupleName}"!`
+            : `Akun & ruang "${res.couple.coupleName}" berhasil dibuat!`
+        );
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal mendaftarkan akun.'), 'Gagal Daftar');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyAuthSession, showError]
+  );
+
+  const loginAccount = useCallback(
+    async (email: string, password: string) => {
+      setLoading(true);
+      try {
+        const res = await duaSakuApi.login(email.trim(), password);
+        await applyAuthSession(res, `Selamat datang kembali, ${res.partner.name}!`);
+      } catch (err) {
+        showError(getErrorMessage(err, 'Email atau password salah.'), 'Gagal Masuk');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyAuthSession, showError]
+  );
+
   const createCouple = useCallback(
     async (coupleName: string, partnerName: string) => {
       setLoading(true);
       try {
         const res = await duaSakuApi.createCouple(coupleName.trim(), partnerName.trim());
-        const nextCouple = { ...res.couple, partners: [res.partner] };
-        saveSession(res.token, res.partner, nextCouple);
-        setCouple(nextCouple);
-        setMe(res.partner);
-        setToken(res.token);
-        setActiveTab('dashboard');
-        await syncAll(res.token, selectedMonth);
-        showSuccess(`Ruang "${res.couple.coupleName}" berhasil dibuat!`);
+        await applyAuthSession(res, `Ruang "${res.couple.coupleName}" berhasil dibuat!`);
       } catch (err) {
         showError(getErrorMessage(err, 'Gagal membuat ruang pasangan.'), 'Gagal Masuk');
         throw err;
@@ -446,7 +513,7 @@ export function DuaSakuProvider({
         setLoading(false);
       }
     },
-    [selectedMonth, showError, showSuccess, syncAll]
+    [applyAuthSession, showError]
   );
 
   const joinCouple = useCallback(
@@ -457,14 +524,7 @@ export function DuaSakuProvider({
           inviteCode.trim().toUpperCase(),
           partnerName.trim()
         );
-        const nextCouple = { ...res.couple, partners: [res.partner] };
-        saveSession(res.token, res.partner, nextCouple);
-        setCouple(nextCouple);
-        setMe(res.partner);
-        setToken(res.token);
-        setActiveTab('dashboard');
-        await syncAll(res.token, selectedMonth);
-        showSuccess(`Berhasil bergabung ke "${res.couple.coupleName}"!`);
+        await applyAuthSession(res, `Berhasil bergabung ke "${res.couple.coupleName}"!`);
       } catch (err) {
         showError(getErrorMessage(err, 'Gagal bergabung ke ruang pasangan.'), 'Gagal Masuk');
         throw err;
@@ -472,7 +532,7 @@ export function DuaSakuProvider({
         setLoading(false);
       }
     },
-    [selectedMonth, showError, showSuccess, syncAll]
+    [applyAuthSession, showError]
   );
 
   const requireToken = useCallback((): string => {
@@ -938,6 +998,8 @@ export function DuaSakuProvider({
       openNewTransaction,
       openEditTransaction,
       closeQuickEntry,
+      registerAccount,
+      loginAccount,
       createCouple,
       joinCouple,
       updateCoupleProfile,
@@ -994,6 +1056,8 @@ export function DuaSakuProvider({
       openNewTransaction,
       openEditTransaction,
       closeQuickEntry,
+      registerAccount,
+      loginAccount,
       createCouple,
       joinCouple,
       updateCoupleProfile,

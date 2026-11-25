@@ -157,6 +157,25 @@ async function request<T>(
 export const duaSakuApi = {
   getHealth: () => request<HealthResponse>('/api/health'),
 
+  register: (payload: {
+    email: string;
+    password: string;
+    partnerName: string;
+    mode: 'create' | 'join';
+    coupleName?: string;
+    inviteCode?: string;
+  }) =>
+    request<AuthResponse>('/api/auth/register', {
+      method: 'POST',
+      body: payload,
+    }),
+
+  login: (email: string, password: string) =>
+    request<AuthResponse>('/api/auth/login', {
+      method: 'POST',
+      body: { email, password },
+    }),
+
   createCouple: (coupleName: string, partnerName: string) =>
     request<AuthResponse>('/api/couples/create', {
       method: 'POST',

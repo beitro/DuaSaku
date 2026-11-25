@@ -1,7 +1,7 @@
 import express from 'express';
 import pg from 'pg';
 import dotenv from 'dotenv';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -457,6 +457,265 @@ app.post(
     mem.tokens.set(token, partnerId);
     res.status(201).json({
       token,
+      couple,
+      partner: {
+        id: partner.id,
+        coupleId: partner.coupleId,
+        name: partner.name,
+        roleLabel: partner.roleLabel,
+        avatarColor: partner.avatarColor,
+      },
+    });
+  })
+);
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeEmail(raw) {
+  return String(raw || '').trim().toLowerCase();
+}
+
+function hashPassword(password) {
+  const salt = randomBytes(16).toString('hex');
+  const derived = scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${derived}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored || typeof stored !== 'string' || !stored.includes(':')) return false;
+  const [salt, hexHash] = stored.split(':');
+  if (!salt || !hexHash) return false;
+  const expected = Buffer.from(hexHash, 'hex');
+  const actual = scryptSync(password, salt, 64);
+  if (expected.length !== actual.length) return false;
+  return timingSafeEqual(expected, actual);
+}
+
+// Register with email & password (creates new couple space or joins existing via inviteCode)
+app.post(
+  '/api/auth/register',
+  asyncHandler(async (req, res) => {
+    const { email, password, partnerName, mode = 'create', coupleName, inviteCode } = req.body || {};
+    const cleanEmail = normalizeEmail(email);
+    if (!EMAIL_RE.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Format email tidak valid.' });
+    }
+    if (typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'Password minimal 6 karakter.' });
+    }
+    const cleanPartnerName = String(partnerName || '').trim();
+    if (cleanPartnerName.length < 2) {
+      return res.status(400).json({ error: 'Nama Anda wajib diisi (minimal 2 karakter).' });
+    }
+    if (mode !== 'create' && mode !== 'join') {
+      return res.status(400).json({ error: 'Mode registrasi harus create atau join.' });
+    }
+
+    const passwordHash = hashPassword(password);
+    const partnerId = randomUUID();
+    const token = makeToken();
+
+    if (pool) {
+      const existing = await pool.query('SELECT id FROM partners WHERE LOWER(email) = $1', [cleanEmail]);
+      if (existing.rowCount > 0) {
+        return res.status(409).json({ error: 'Email sudah terdaftar. Silakan masuk dengan akun Anda.' });
+      }
+
+      if (mode === 'join') {
+        const code = String(inviteCode || '').trim().toUpperCase();
+        if (!code) {
+          return res.status(400).json({ error: 'Kode undangan pasangan wajib diisi.' });
+        }
+        const cRes = await pool.query('SELECT * FROM couples WHERE invite_code = $1', [code]);
+        if (!cRes.rowCount) {
+          return res.status(404).json({ error: 'Kode undangan pasangan tidak ditemukan.' });
+        }
+        const couple = cRes.rows[0];
+        await pool.query(
+          'INSERT INTO partners(id, couple_id, name, role_label, avatar_color, token, email, password_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+          [partnerId, couple.id, cleanPartnerName, 'Partner B', PARTNER_B_COLOR, token, cleanEmail, passwordHash]
+        );
+        return res.status(201).json({
+          token,
+          couple: { id: couple.id, coupleName: couple.couple_name, inviteCode: couple.invite_code },
+          partner: {
+            id: partnerId,
+            coupleId: couple.id,
+            name: cleanPartnerName,
+            roleLabel: 'Partner B',
+            avatarColor: PARTNER_B_COLOR,
+          },
+        });
+      }
+
+      const coupleId = randomUUID();
+      const newInviteCode = makeInviteCode();
+      const cleanCoupleName = String(coupleName || `Dompet ${cleanPartnerName}`).trim();
+      await withPgTx(async (client) => {
+        await client.query(
+          'INSERT INTO couples(id, couple_name, invite_code) VALUES($1,$2,$3)',
+          [coupleId, cleanCoupleName, newInviteCode]
+        );
+        await client.query(
+          'INSERT INTO partners(id, couple_id, name, role_label, avatar_color, token, email, password_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+          [partnerId, coupleId, cleanPartnerName, 'Partner A', PARTNER_A_COLOR, token, cleanEmail, passwordHash]
+        );
+        for (const cat of DEFAULT_CATEGORIES) {
+          await client.query(
+            'INSERT INTO categories(id, couple_id, name, icon, color, target_amount, is_default) VALUES($1,$2,$3,$4,$5,$6,$7)',
+            [randomUUID(), coupleId, cat.name, cat.icon, cat.color, cat.targetAmount, cat.isDefault]
+          );
+        }
+      });
+      return res.status(201).json({
+        token,
+        couple: { id: coupleId, coupleName: cleanCoupleName, inviteCode: newInviteCode },
+        partner: {
+          id: partnerId,
+          coupleId,
+          name: cleanPartnerName,
+          roleLabel: 'Partner A',
+          avatarColor: PARTNER_A_COLOR,
+        },
+      });
+    }
+
+    const dupMem = Array.from(mem.partners.values()).find((p) => p.email === cleanEmail);
+    if (dupMem) {
+      return res.status(409).json({ error: 'Email sudah terdaftar. Silakan masuk dengan akun Anda.' });
+    }
+
+    if (mode === 'join') {
+      const code = String(inviteCode || '').trim().toUpperCase();
+      if (!code) {
+        return res.status(400).json({ error: 'Kode undangan pasangan wajib diisi.' });
+      }
+      const couple = Array.from(mem.couples.values()).find((c) => c.inviteCode === code);
+      if (!couple) {
+        return res.status(404).json({ error: 'Kode undangan pasangan tidak ditemukan.' });
+      }
+      const partner = {
+        id: partnerId,
+        coupleId: couple.id,
+        name: cleanPartnerName,
+        roleLabel: 'Partner B',
+        avatarColor: PARTNER_B_COLOR,
+        email: cleanEmail,
+        passwordHash,
+        createdAtMs: Date.now(),
+      };
+      mem.partners.set(partnerId, partner);
+      mem.tokens.set(token, partnerId);
+      return res.status(201).json({
+        token,
+        couple,
+        partner: {
+          id: partner.id,
+          coupleId: partner.coupleId,
+          name: partner.name,
+          roleLabel: partner.roleLabel,
+          avatarColor: partner.avatarColor,
+        },
+      });
+    }
+
+    const coupleId = randomUUID();
+    const newInviteCode = makeInviteCode();
+    const cleanCoupleName = String(coupleName || `Dompet ${cleanPartnerName}`).trim();
+    const nowMs = Date.now();
+    const couple = { id: coupleId, coupleName: cleanCoupleName, inviteCode: newInviteCode };
+    mem.couples.set(coupleId, couple);
+    const partner = {
+      id: partnerId,
+      coupleId,
+      name: cleanPartnerName,
+      roleLabel: 'Partner A',
+      avatarColor: PARTNER_A_COLOR,
+      email: cleanEmail,
+      passwordHash,
+      createdAtMs: nowMs,
+    };
+    mem.partners.set(partnerId, partner);
+    mem.tokens.set(token, partnerId);
+    mem.categories.set(
+      coupleId,
+      DEFAULT_CATEGORIES.map((cat, idx) => ({ id: randomUUID(), coupleId, ...cat, createdAtMs: nowMs + idx }))
+    );
+    mem.accounts.set(coupleId, []);
+    mem.transactions.set(coupleId, []);
+    mem.transfers.set(coupleId, []);
+    mem.budgets.set(coupleId, []);
+    mem.notes.set(coupleId, []);
+
+    res.status(201).json({
+      token,
+      couple,
+      partner: {
+        id: partner.id,
+        coupleId: partner.coupleId,
+        name: partner.name,
+        roleLabel: partner.roleLabel,
+        avatarColor: partner.avatarColor,
+      },
+    });
+  })
+);
+
+// Login with email & password
+app.post(
+  '/api/auth/login',
+  asyncHandler(async (req, res) => {
+    const { email, password } = req.body || {};
+    const cleanEmail = normalizeEmail(email);
+    if (!EMAIL_RE.test(cleanEmail) || typeof password !== 'string' || !password) {
+      return res.status(400).json({ error: 'Email dan password wajib diisi.' });
+    }
+
+    const newToken = makeToken();
+
+    if (pool) {
+      const pRes = await pool.query('SELECT * FROM partners WHERE LOWER(email) = $1', [cleanEmail]);
+      if (!pRes.rowCount) {
+        return res.status(401).json({ error: 'Email atau password salah.' });
+      }
+      const pRow = pRes.rows[0];
+      if (!verifyPassword(password, pRow.password_hash)) {
+        return res.status(401).json({ error: 'Email atau password salah.' });
+      }
+      await pool.query('UPDATE partners SET token = $1 WHERE id = $2', [newToken, pRow.id]);
+      const cRes = await pool.query('SELECT * FROM couples WHERE id = $1', [pRow.couple_id]);
+      if (!cRes.rowCount) {
+        return res.status(404).json({ error: 'Ruang pasangan tidak ditemukan.' });
+      }
+      const cRow = cRes.rows[0];
+      return res.json({
+        token: newToken,
+        couple: { id: cRow.id, coupleName: cRow.couple_name, inviteCode: cRow.invite_code },
+        partner: {
+          id: pRow.id,
+          coupleId: pRow.couple_id,
+          name: pRow.name,
+          roleLabel: pRow.role_label,
+          avatarColor: pRow.avatar_color,
+        },
+      });
+    }
+
+    const partner = Array.from(mem.partners.values()).find((p) => p.email === cleanEmail);
+    if (!partner || !verifyPassword(password, partner.passwordHash)) {
+      return res.status(401).json({ error: 'Email atau password salah.' });
+    }
+    const couple = mem.couples.get(partner.coupleId);
+    if (!couple) {
+      return res.status(404).json({ error: 'Ruang pasangan tidak ditemukan.' });
+    }
+    for (const [tok, pid] of mem.tokens.entries()) {
+      if (pid === partner.id) mem.tokens.delete(tok);
+    }
+    mem.tokens.set(newToken, partner.id);
+
+    res.json({
+      token: newToken,
       couple,
       partner: {
         id: partner.id,
