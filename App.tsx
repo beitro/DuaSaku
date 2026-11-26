@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  BackHandler,
   Linking,
   ScrollView,
   StyleSheet,
@@ -66,6 +68,31 @@ function AppContent(): React.JSX.Element {
     logout,
   } = useDuaSaku();
   const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    fadeAnim.setValue(0);
+    Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  }, [activeTab, fadeAnim]);
+  const [tabHistory, setTabHistory] = useState<TabKey[]>([]);
+
+  useEffect(() => {
+    setTabHistory((prev) =>
+      prev.length > 0 && prev[prev.length - 1] === activeTab ? prev : [...prev, activeTab],
+    );
+  }, [activeTab]);
+
+  useEffect(() => {
+    const onBack = () => {
+      if (tabHistory.length <= 1) return false;
+      const next = tabHistory.slice(0, -1);
+      const target = next[next.length - 1];
+      if (target) setActiveTab(target);
+      setTabHistory(next);
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [tabHistory, setActiveTab]);
 
   useEffect(() => {
     if (!token || !couple) return;
@@ -170,8 +197,7 @@ function AppContent(): React.JSX.Element {
   return (
     <AppFrame>
       <StatusBar style="dark" />
-
-      {/* Header */}
+      <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
           <View style={styles.headerLeft}>
@@ -336,6 +362,7 @@ function AppContent(): React.JSX.Element {
         onConfirm={executeConfirm}
         onCancel={closeConfirm}
       />
+      </Animated.View>
     </AppFrame>
   );
 }

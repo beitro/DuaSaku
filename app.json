@@ -19,11 +19,16 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FAF6F0"
       },
-      "permissions": ["INTERNET", "ACCESS_NETWORK_STATE"],
-
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
     },
     "extra": {
-      "apiUrl": "https://duasaku-api.vercel.app"
+      "apiUrl": "https://duasaku-api.vercel.app",
+      "eas": {
+        "projectId": "56fde718-5f8b-43a9-99d6-83caf98037c7"
+      }
     },
     "owner": "beitro",
     "runtimeVersion": {
