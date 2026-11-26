@@ -141,6 +141,7 @@ export function OnboardingScreen(): React.JSX.Element {
 
           {step === 'welcome' && (
             <View style={styles.welcomeContainer}>
+              <Text style={styles.logoText}>💰 DuaSaku</Text>
               <DashboardHero
                 kicker="DUASAKU · KEUANGAN PASANGAN"
                 amount="Rp 14.650.000"
@@ -659,6 +660,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: COLORS.white,
+  },
+  logoText: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: COLORS.terracotta,
+    textAlign: 'center',
+    marginBottom: SPACING.sm,
   },
   welcomeTitle: {
     fontSize: 24,
