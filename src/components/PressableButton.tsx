@@ -101,7 +101,13 @@ export const PressableButton = React.forwardRef<React.ComponentRef<typeof Pressa
           {loadingLabel}
         </Text>
       )}
-      {children}
+      {typeof children === 'string' ? (
+        <Text style={[styles.label, VARIANT_TEXT[variant], { fontSize: SIZE_FONT[size] }]}>
+          {children}
+        </Text>
+      ) : (
+        children
+      )}
     </Pressable>
   );
 });
