@@ -101,6 +101,17 @@ export const SHADOWS: Record<'card' | 'elevated' | 'hero', ViewStyle> = {
   },
 };
 
+export const MOTION = {
+  duration: { fast: 150, normal: 250, slow: 400, modal: 300 },
+  easing: {
+    standard: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    spring: { damping: 15, stiffness: 150, mass: 1 },
+    springSnappy: { damping: 12, stiffness: 180, mass: 1 },
+  },
+} as const;
+
+export type MotionDuration = keyof typeof MOTION.duration;
+
 export const CATEGORY_COLOR_PRESETS = [
   '#C86446', // Terracotta (Matches server Menikah)
   '#5B8260', // Sage (Matches server Traveling)
