@@ -23,6 +23,7 @@ import {
 } from '../utils/format';
 import { parseReceiptLocally } from '../utils/receiptParser';
 import { CalculatorKeypad } from './CalculatorKeypad';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 export function QuickEntrySheet(): React.JSX.Element | null {
   const {
@@ -55,6 +56,9 @@ export function QuickEntrySheet(): React.JSX.Element | null {
   const [showReceiptBox, setShowReceiptBox] = useState(false);
   const [receiptText, setReceiptText] = useState('');
   const [parsingReceipt, setParsingReceipt] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const cameraRef = useRef<any>(null);
   const prevOpenRef = useRef(false);
   const prevQuickEntryRef = useRef(quickEntry);
 
@@ -210,6 +214,7 @@ export function QuickEntrySheet(): React.JSX.Element | null {
   };
 
   return (
+    <>
     <Modal
       visible={quickEntryOpen}
       transparent
@@ -335,6 +340,19 @@ export function QuickEntrySheet(): React.JSX.Element | null {
                 <Text style={styles.receiptHint}>
                   Tempel teks struk belanja/e-wallet untuk isi nominal, merchant & kategori otomatis:
                 </Text>
+                <TouchableOpacity
+                  style={styles.receiptParseBtn}
+                  onPress={async () => {
+                    if (!cameraPermission?.granted) {
+                      const res = await requestCameraPermission();
+                      if (!res.granted) return;
+                    }
+                    setShowCamera(true);
+                  }}
+                  testID="receipt-camera-btn"
+                >
+                  <Text style={styles.receiptParseBtnText}>📷 Ambil Foto Struk</Text>
+                </TouchableOpacity>
                 <TextInput
                   style={styles.receiptInput}
                   multiline
@@ -495,6 +513,40 @@ export function QuickEntrySheet(): React.JSX.Element | null {
         </View>
       </View>
     </Modal>
+    {showCamera && (
+      <Modal visible transparent animationType="slide">
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
+          <CameraView ref={cameraRef} style={{ flex: 1 }} facing="back" />
+          <View style={{ position: 'absolute', bottom: 40, alignSelf: 'center' }}>
+            <TouchableOpacity
+              style={styles.receiptParseBtn}
+              onPress={async () => {
+                try {
+                  const photo = await cameraRef.current?.takePictureAsync();
+                  if (photo?.uri) {
+                    setShowCamera(false);
+                    setReceiptText(`[Foto diambil: ${photo.uri}] — OCR belum terpasang, tempel teks struk manual.`);
+                  }
+                } catch {
+                  setShowCamera(false);
+                }
+              }}
+              testID="camera-capture-btn"
+            >
+              <Text style={styles.receiptParseBtnText}>Ambil Foto</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.receiptParseBtn}
+              onPress={() => setShowCamera(false)}
+              testID="camera-close-btn"
+            >
+              <Text style={styles.receiptParseBtnText}>Tutup</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    )}
+  </>
   );
 }
 
