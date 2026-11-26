@@ -7,11 +7,13 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { AppFrame } from '../components/AppFrame';
 import { FeedbackBanner } from '../components/FeedbackBanner';
+import { DashboardHero } from '../components/DashboardHero';
+import { ChipGroup } from '../components/ChipGroup';
+import { PressableButton } from '../components/PressableButton';
 import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 
@@ -139,15 +141,14 @@ export function OnboardingScreen(): React.JSX.Element {
 
           {step === 'welcome' && (
             <View style={styles.welcomeContainer}>
-              <View>
-                <View style={styles.brandPill}>
-                  <Text style={styles.brandBadge}>DUASAKU · KEUANGAN PASANGAN</Text>
-                </View>
-
-                <View style={styles.heroCard}>
-                  <Text style={styles.heroEyebrow}>Dompet Masa Depan · Raka & Nadia</Text>
-                  <Text style={styles.heroAmount}>Rp 14.650.000</Text>
-                  <View style={styles.heroChipsRow}>
+              <DashboardHero
+                kicker="DUASAKU · KEUANGAN PASANGAN"
+                amount="Rp 14.650.000"
+                subtitle="Dompet Masa Depan · Raka & Nadia"
+                padding="xl"
+                testID="onboarding-hero"
+                children={
+                  <View style={styles.heroChipsRow} testID="onboarding-hero-chips">
                     <View style={styles.heroChip}>
                       <Text style={styles.heroChipText}>💍 Menikah · 68%</Text>
                     </View>
@@ -158,59 +159,59 @@ export function OnboardingScreen(): React.JSX.Element {
                       <Text style={styles.heroChipText}>📈 Investasi</Text>
                     </View>
                   </View>
+                }
+              />
+
+              <Text style={styles.welcomeTitle}>Atur Uang Berdua, Tanpa Drama.</Text>
+              <Text style={styles.welcomeSubtitle}>
+                Satu ruang hangat untuk pantau pemasukan, pengeluaran, dan tabungan impian kalian
+                secara real-time.
+              </Text>
+
+              <View style={styles.valuePropsList}>
+                <View style={styles.valuePropRow}>
+                  <View style={[styles.valueIconBadge, { backgroundColor: COLORS.terracottaSoft }]}>
+                    <Text style={styles.valueIconText}>⚡</Text>
+                  </View>
+                  <Text style={styles.valuePropText}>
+                    Catat transaksi harian berdua, langsung tersinkron
+                  </Text>
                 </View>
-
-                <Text style={styles.welcomeTitle}>Atur Uang Berdua, Tanpa Drama.</Text>
-                <Text style={styles.welcomeSubtitle}>
-                  Satu ruang hangat untuk pantau pemasukan, pengeluaran, dan tabungan impian kalian
-                  secara real-time.
-                </Text>
-
-                <View style={styles.valuePropsList}>
-                  <View style={styles.valuePropRow}>
-                    <View style={[styles.valueIconBadge, { backgroundColor: COLORS.terracottaSoft }]}>
-                      <Text style={styles.valueIconText}>⚡</Text>
-                    </View>
-                    <Text style={styles.valuePropText}>
-                      Catat transaksi harian berdua, langsung tersinkron
-                    </Text>
+                <View style={styles.valuePropRow}>
+                  <View style={[styles.valueIconBadge, { backgroundColor: COLORS.sageSoft }]}>
+                    <Text style={styles.valueIconText}>🎯</Text>
                   </View>
-                  <View style={styles.valuePropRow}>
-                    <View style={[styles.valueIconBadge, { backgroundColor: COLORS.sageSoft }]}>
-                      <Text style={styles.valueIconText}>🎯</Text>
-                    </View>
-                    <Text style={styles.valuePropText}>
-                      Pantau pos Menikah, Traveling, hingga Investasi
-                    </Text>
+                  <Text style={styles.valuePropText}>
+                    Pantau pos Menikah, Traveling, hingga Investasi
+                  </Text>
+                </View>
+                <View style={styles.valuePropRow}>
+                  <View style={[styles.valueIconBadge, { backgroundColor: COLORS.ochreSoft }]}>
+                    <Text style={styles.valueIconText}>💬</Text>
                   </View>
-                  <View style={styles.valuePropRow}>
-                    <View style={[styles.valueIconBadge, { backgroundColor: COLORS.ochreSoft }]}>
-                      <Text style={styles.valueIconText}>💬</Text>
-                    </View>
-                    <Text style={styles.valuePropText}>
-                      Anggaran bulanan jelas, semua terasa lebih ringan
-                    </Text>
-                  </View>
+                  <Text style={styles.valuePropText}>
+                    Anggaran bulanan jelas, semua terasa lebih ringan
+                  </Text>
                 </View>
               </View>
 
               <View style={styles.welcomeCtaStack}>
-                <TouchableOpacity
-                  style={styles.primaryBtn}
+                <PressableButton
+                  variant="primary"
+                  size="lg"
                   onPress={() => goToStep('register_account')}
-                  accessibilityRole="button"
                   testID="welcome-create-account-btn"
                 >
-                  <Text style={styles.primaryBtnText}>Buat Akun</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.secondaryBtn}
+                  Buat Akun
+                </PressableButton>
+                <PressableButton
+                  variant="secondary"
+                  size="lg"
                   onPress={() => goToStep('login')}
-                  accessibilityRole="button"
                   testID="welcome-login-btn"
                 >
-                  <Text style={styles.secondaryBtnText}>Masuk</Text>
-                </TouchableOpacity>
+                  Masuk
+                </PressableButton>
                 <Text style={styles.microFooter}>
                   Gratis untuk mulai · Siap dipakai berdua dalam 1 menit
                 </Text>
@@ -221,15 +222,15 @@ export function OnboardingScreen(): React.JSX.Element {
           {step === 'login' && (
             <View style={styles.formContainer}>
               <View style={styles.topBar}>
-                <TouchableOpacity
-                  style={styles.backBtn}
-                  onPress={() => goToStep('welcome')}
-                  accessibilityRole="button"
-                  testID="onboarding-back-btn"
-                >
-                  <Text style={styles.backBtnText}>← Kembali</Text>
-                </TouchableOpacity>
-              </View>
+                              <PressableButton
+                                variant="ghost"
+                                size="sm"
+                                onPress={() => goToStep('welcome')}
+                                testID="onboarding-back-btn"
+                              >
+                                ← Kembali
+                              </PressableButton>
+                            </View>
 
               <Text style={styles.stepTitle}>Senang Melihatmu Lagi</Text>
               <Text style={styles.stepSubtitle}>
@@ -269,14 +270,14 @@ export function OnboardingScreen(): React.JSX.Element {
                     onSubmitEditing={handleLoginSubmit}
                     testID="login-password-input"
                   />
-                  <TouchableOpacity
-                    style={styles.showPwdBtn}
+                  <PressableButton
+                    variant="ghost"
+                    size="sm"
                     onPress={() => setShowPassword((prev) => !prev)}
-                    accessibilityRole="button"
                     testID="onboarding-toggle-password"
                   >
                     <Text style={styles.showPwdText}>{showPassword ? 'Tutup' : 'Lihat'}</Text>
-                  </TouchableOpacity>
+                  </PressableButton>
                 </View>
 
                 {!!localError && (
@@ -285,45 +286,39 @@ export function OnboardingScreen(): React.JSX.Element {
                   </View>
                 )}
 
-                <TouchableOpacity
-                  style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]}
+                <PressableButton
+                  variant="primary"
+                  size="lg"
                   onPress={handleLoginSubmit}
                   disabled={loading}
-                  accessibilityRole="button"
                   testID="login-submit-btn"
                 >
-                  {loading ? (
-                    <ActivityIndicator color={COLORS.white} />
-                  ) : (
-                    <Text style={styles.primaryBtnText}>Masuk ke Ruang</Text>
-                  )}
-                </TouchableOpacity>
+                  {loading ? 'Memproses...' : 'Masuk ke Ruang'}
+                </PressableButton>
               </View>
 
-              <TouchableOpacity
-                style={styles.switchLinkBtn}
+              <PressableButton
+                variant="ghost"
+                size="sm"
                 onPress={() => goToStep('register_account')}
-                accessibilityRole="button"
                 testID="switch-to-register-btn"
               >
-                <Text style={styles.switchLinkText}>
-                  Belum punya akun? <Text style={styles.switchLinkBold}>Buat Akun</Text>
-                </Text>
-              </TouchableOpacity>
+                Belum punya akun? <Text style={styles.switchLinkBold}>Buat Akun</Text>
+              </PressableButton>
             </View>
           )}
 
           {step === 'register_account' && (
             <View style={styles.formContainer}>
               <View style={styles.topBar}>
-                <TouchableOpacity
-                  style={styles.backBtn}
+                <PressableButton
+                  variant="ghost"
+                  size="sm"
                   onPress={() => goToStep('welcome')}
-                  accessibilityRole="button"
                   testID="onboarding-back-btn"
                 >
-                  <Text style={styles.backBtnText}>← Kembali</Text>
-                </TouchableOpacity>
+                  ← Kembali
+                </PressableButton>
                 <View style={styles.stepPill}>
                   <Text style={styles.stepPillText}>Langkah 1 dari 2</Text>
                 </View>
@@ -388,14 +383,14 @@ export function OnboardingScreen(): React.JSX.Element {
                     onSubmitEditing={handleRegisterAccountNext}
                     testID="register-password-input"
                   />
-                  <TouchableOpacity
-                    style={styles.showPwdBtn}
+                  <PressableButton
+                    variant="ghost"
+                    size="sm"
                     onPress={() => setShowPassword((prev) => !prev)}
-                    accessibilityRole="button"
                     testID="onboarding-toggle-password"
                   >
                     <Text style={styles.showPwdText}>{showPassword ? 'Tutup' : 'Lihat'}</Text>
-                  </TouchableOpacity>
+                  </PressableButton>
                 </View>
 
                 {!!localError && (
@@ -404,40 +399,38 @@ export function OnboardingScreen(): React.JSX.Element {
                   </View>
                 )}
 
-                <TouchableOpacity
-                  style={styles.primaryBtn}
+                <PressableButton
+                  variant="primary"
+                  size="lg"
                   onPress={handleRegisterAccountNext}
-                  accessibilityRole="button"
                   testID="register-next-btn"
                 >
-                  <Text style={styles.primaryBtnText}>Lanjut Pilih Ruang</Text>
-                </TouchableOpacity>
+                  Lanjut Pilih Ruang
+                </PressableButton>
               </View>
 
-              <TouchableOpacity
-                style={styles.switchLinkBtn}
+              <PressableButton
+                variant="ghost"
+                size="sm"
                 onPress={() => goToStep('login')}
-                accessibilityRole="button"
                 testID="switch-to-login-btn"
               >
-                <Text style={styles.switchLinkText}>
-                  Sudah punya akun? <Text style={styles.switchLinkBold}>Masuk</Text>
-                </Text>
-              </TouchableOpacity>
+                Sudah punya akun? <Text style={styles.switchLinkBold}>Masuk</Text>
+              </PressableButton>
             </View>
           )}
 
           {step === 'setup_space' && (
             <View style={styles.formContainer}>
               <View style={styles.topBar}>
-                <TouchableOpacity
-                  style={styles.backBtn}
+                <PressableButton
+                  variant="ghost"
+                  size="sm"
                   onPress={() => goToStep('register_account')}
-                  accessibilityRole="button"
                   testID="onboarding-back-btn"
                 >
-                  <Text style={styles.backBtnText}>← Kembali</Text>
-                </TouchableOpacity>
+                  ← Kembali
+                </PressableButton>
                 <View style={styles.stepPill}>
                   <Text style={styles.stepPillText}>Langkah 2 dari 2</Text>
                 </View>
@@ -454,55 +447,63 @@ export function OnboardingScreen(): React.JSX.Element {
 
               <View style={styles.card}>
                 <View style={styles.optionRow}>
-                  <TouchableOpacity
+                  <PressableButton
+                    variant="ghost"
+                    size="md"
                     style={[
                       styles.optionCard,
                       spaceMode === 'create' && styles.optionCardActive,
-                    ]}
+                    ].flat() as any}
                     onPress={() => {
                       setSpaceMode('create');
                       setLocalError(null);
                     }}
-                    accessibilityRole="button"
                     testID="setup-mode-create"
-                  >
-                    <Text
-                      style={[
-                        styles.optionTitle,
-                        spaceMode === 'create' && styles.optionTitleActive,
-                      ]}
-                    >
-                      Buat Ruang Baru
-                    </Text>
-                    <Text style={styles.optionDesc}>
-                      Dapatkan kode undangan untuk pasangan.
-                    </Text>
-                  </TouchableOpacity>
+                    children={
+                      <>
+                        <Text
+                          style={[
+                            styles.optionTitle,
+                            spaceMode === 'create' && styles.optionTitleActive,
+                          ].flat() as any}
+                        >
+                          Buat Ruang Baru
+                        </Text>
+                        <Text style={styles.optionDesc}>
+                          Dapatkan kode undangan untuk pasangan.
+                        </Text>
+                      </>
+                    }
+                  />
 
-                  <TouchableOpacity
+                  <PressableButton
+                    variant="ghost"
+                    size="md"
                     style={[
                       styles.optionCard,
                       spaceMode === 'join' && styles.optionCardActive,
-                    ]}
+                    ].flat() as any}
                     onPress={() => {
                       setSpaceMode('join');
                       setLocalError(null);
                     }}
-                    accessibilityRole="button"
                     testID="setup-mode-join"
-                  >
-                    <Text
-                      style={[
-                        styles.optionTitle,
-                        spaceMode === 'join' && styles.optionTitleActive,
-                      ]}
-                    >
-                      Gabung Pasangan
-                    </Text>
-                    <Text style={styles.optionDesc}>
-                      Punya kode 6 karakter? Gabung di sini.
-                    </Text>
-                  </TouchableOpacity>
+                    children={
+                      <>
+                        <Text
+                          style={[
+                            styles.optionTitle,
+                            spaceMode === 'join' && styles.optionTitleActive,
+                          ].flat() as any}
+                        >
+                          Gabung Pasangan
+                        </Text>
+                        <Text style={styles.optionDesc}>
+                          Punya kode 6 karakter? Gabung di sini.
+                        </Text>
+                      </>
+                    }
+                  />
                 </View>
 
                 {spaceMode === 'create' ? (
@@ -555,35 +556,29 @@ export function OnboardingScreen(): React.JSX.Element {
                   </View>
                 )}
 
-                <TouchableOpacity
-                  style={[styles.primaryBtn, loading && styles.primaryBtnDisabled]}
+                <PressableButton
+                  variant="primary"
+                  size="lg"
                   onPress={handleSetupSpaceSubmit}
                   disabled={loading}
-                  accessibilityRole="button"
                   testID="setup-submit-btn"
                 >
-                  {loading ? (
-                    <ActivityIndicator color={COLORS.white} />
-                  ) : (
-                    <Text style={styles.primaryBtnText}>
-                      {spaceMode === 'join'
-                        ? 'Buat Akun & Gabung Ruang'
-                        : 'Buat Akun & Mulai Ruang'}
-                    </Text>
-                  )}
-                </TouchableOpacity>
+                  {loading
+                    ? 'Memproses...'
+                    : spaceMode === 'join'
+                    ? 'Buat Akun & Gabung Ruang'
+                    : 'Buat Akun & Mulai Ruang'}
+                </PressableButton>
               </View>
 
-              <TouchableOpacity
-                style={styles.switchLinkBtn}
+              <PressableButton
+                variant="ghost"
+                size="sm"
                 onPress={() => goToStep('login')}
-                accessibilityRole="button"
                 testID="setup-switch-login-btn"
               >
-                <Text style={styles.switchLinkText}>
-                  Sudah terdaftar? <Text style={styles.switchLinkBold}>Masuk</Text>
-                </Text>
-              </TouchableOpacity>
+                Sudah terdaftar? <Text style={styles.switchLinkBold}>Masuk</Text>
+              </PressableButton>
             </View>
           )}
         </ScrollView>

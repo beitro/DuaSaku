@@ -7,7 +7,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -30,6 +29,9 @@ import {
   isValidDateInput,
   parseIdrInput,
 } from '../utils/format';
+import { DashboardHero } from '../components/DashboardHero';
+import { PressableButton } from '../components/PressableButton';
+import { ChipGroup } from '../components/ChipGroup';
 
 const ACCOUNT_TYPES: AccountType[] = ['cash', 'bank', 'ewallet', 'shared_savings', 'other'];
 
@@ -178,34 +180,33 @@ export function AccountsScreen(): React.JSX.Element {
   return (
     <View style={styles.container} testID="accounts-screen">
       {/* Totals Card */}
-      <View style={styles.heroCard}>
-        <View style={styles.heroTopRow}>
-          <Text style={styles.heroKicker}>Total Saldo Semua Dompet</Text>
-          <View style={styles.heroBtnGroup}>
-            <TouchableOpacity
-              style={styles.transferBtn}
-              onPress={openTransfer}
-              accessibilityRole="button"
-              testID="transfer-account-btn"
-            >
-              <Text style={styles.transferBtnText}>⇄ Transfer</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.addBtn}
-              onPress={openCreate}
-              accessibilityRole="button"
-              testID="add-account-btn"
-            >
-              <Text style={styles.addBtnText}>+ Dompet</Text>
-            </TouchableOpacity>
-          </View>
+      <DashboardHero
+        kicker="Total Saldo Semua Dompet"
+        amount={formatRp(accountTotals.totalBalance)}
+        primaryActions={[
+          {
+            label: '⇄ Transfer',
+            onPress: openTransfer,
+            variant: 'ghost',
+            size: 'sm',
+          },
+          {
+            label: '+ Dompet',
+            onPress: openCreate,
+            variant: 'primary',
+            size: 'sm',
+          },
+        ]}
+        testID="account-hero-card"
+      >
+        <View style={styles.statRow}>
+          <Text style={styles.statLabel}>Bersama</Text>
+          <Text style={styles.statValue}>{formatRp(accountTotals.sharedBalance)}</Text>
+          <View style={styles.statDivider} />
+          <Text style={styles.statLabel}>Pribadi</Text>
+          <Text style={styles.statValue}>{formatRp(accountTotals.personalBalance)}</Text>
         </View>
-        <Text style={styles.heroAmount}>{formatRp(accountTotals.totalBalance)}</Text>
-        <View style={styles.rowBetween}>
-          <Text style={styles.heroSub}>Bersama: {formatRp(accountTotals.sharedBalance)}</Text>
-          <Text style={styles.heroSub}>Pribadi: {formatRp(accountTotals.personalBalance)}</Text>
-        </View>
-      </View>
+      </DashboardHero>
 
       {/* Accounts List */}
       {accounts.length === 0 ? (
@@ -230,11 +231,18 @@ export function AccountsScreen(): React.JSX.Element {
               {formatRp(acc.initialBalance)}
             </Text>
             <View style={styles.actionsRow}>
-              <TouchableOpacity style={styles.actionPill} onPress={() => openEdit(acc)}>
-                <Text style={styles.actionPillText}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionPill, styles.deletePill]}
+              <PressableButton
+                variant="ghost"
+                size="sm"
+                style={styles.actionPill}
+                onPress={() => openEdit(acc)}
+              >
+                Edit
+              </PressableButton>
+              <PressableButton
+                variant="ghost"
+                size="sm"
+                style={[styles.actionPill, styles.deletePill].flat() as any}
                 onPress={() =>
                   requestConfirm({
                     title: 'Hapus Dompet?',
@@ -245,8 +253,8 @@ export function AccountsScreen(): React.JSX.Element {
                   })
                 }
               >
-                <Text style={styles.deletePillText}>Hapus</Text>
-              </TouchableOpacity>
+                Hapus
+              </PressableButton>
             </View>
           </View>
         ))
@@ -298,38 +306,38 @@ export function AccountsScreen(): React.JSX.Element {
               />
 
               <Text style={styles.label}>Jenis</Text>
-              <View style={styles.chipWrap}>
-                {ACCOUNT_TYPES.map((t) => (
-                  <TouchableOpacity
-                    key={t}
-                    style={[styles.chip, accountType === t && styles.chipActive]}
-                    onPress={() => setAccountType(t)}
-                  >
-                    <Text style={[styles.chipText, accountType === t && styles.chipTextActive]}>
-                      {ACCOUNT_TYPE_ICONS[t]} {ACCOUNT_TYPE_LABELS[t]}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <ChipGroup<AccountType>
+                options={ACCOUNT_TYPES.map((t) => ({
+                  value: t,
+                  label: `${ACCOUNT_TYPE_ICONS[t]} ${ACCOUNT_TYPE_LABELS[t]}`,
+                }))}
+                selected={accountType}
+                onSelect={setAccountType}
+                layout="wrap"
+              />
 
               <Text style={styles.label}>Kepemilikan</Text>
               <View style={styles.segmentRow}>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, isShared && styles.segmentActive]}
+                <PressableButton
+                  variant="ghost"
+                  size="sm"
+                  style={[styles.segmentBtn, isShared && styles.segmentActive].flat() as any}
                   onPress={() => setIsShared(true)}
                 >
-                  <Text style={[styles.segmentText, isShared && styles.segmentTextActive]}>
+                  <Text style={[styles.segmentText, isShared && styles.segmentTextActive].flat() as any}>
                     Dompet Bersama
                   </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, !isShared && styles.segmentActive]}
+                </PressableButton>
+                <PressableButton
+                  variant="ghost"
+                  size="sm"
+                  style={[styles.segmentBtn, !isShared && styles.segmentActive].flat() as any}
                   onPress={() => setIsShared(false)}
                 >
-                  <Text style={[styles.segmentText, !isShared && styles.segmentTextActive]}>
+                  <Text style={[styles.segmentText, !isShared && styles.segmentTextActive].flat() as any}>
                     Pribadi ({me?.name})
                   </Text>
-                </TouchableOpacity>
+                </PressableButton>
               </View>
 
               <Text style={styles.label}>Saldo Awal (Rp)</Text>
@@ -343,16 +351,23 @@ export function AccountsScreen(): React.JSX.Element {
               />
 
               <View style={styles.footerRow}>
-                <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
-                  <Text style={styles.cancelBtnText}>Batal</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={submitting}>
-                  {submitting ? (
-                    <ActivityIndicator color={COLORS.white} />
-                  ) : (
-                    <Text style={styles.saveBtnText}>Simpan</Text>
-                  )}
-                </TouchableOpacity>
+                <PressableButton
+                  variant="ghost"
+                  size="md"
+                  style={styles.cancelBtn}
+                  onPress={() => setModalVisible(false)}
+                >
+                  Batal
+                </PressableButton>
+                <PressableButton
+                  variant="primary"
+                  size="md"
+                  style={styles.saveBtn}
+                  onPress={handleSave}
+                  disabled={submitting}
+                >
+                  {submitting ? 'Menyimpan...' : 'Simpan'}
+                </PressableButton>
               </View>
             </View>
           </ScrollView>
@@ -375,42 +390,34 @@ export function AccountsScreen(): React.JSX.Element {
               <Text style={styles.modalTitle}>Transfer Antar Dompet</Text>
 
               <Text style={styles.label}>Dari Dompet</Text>
-              <View style={styles.chipWrap}>
-                {accounts.map((acc) => (
-                  <TouchableOpacity
-                    key={`from-${acc.id}`}
-                    style={[styles.chip, fromAccountId === acc.id && styles.chipActive]}
-                    onPress={() => {
-                      setFromAccountId(acc.id);
-                      if (transferError) setTransferError(null);
-                    }}
-                    testID={`transfer-from-${acc.id}`}
-                  >
-                    <Text style={[styles.chipText, fromAccountId === acc.id && styles.chipTextActive]}>
-                      {acc.icon} {acc.name} ({formatRp(acc.balance)})
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <ChipGroup<string>
+                options={accounts.map((acc) => ({
+                  value: acc.id,
+                  label: `${acc.icon} ${acc.name} (${formatRp(acc.balance)})`,
+                  testID: `transfer-from-${acc.id}`,
+                }))}
+                selected={fromAccountId || null}
+                onSelect={(id) => {
+                  setFromAccountId(id);
+                  if (transferError) setTransferError(null);
+                }}
+                layout="wrap"
+              />
 
               <Text style={styles.label}>Ke Dompet</Text>
-              <View style={styles.chipWrap}>
-                {accounts.map((acc) => (
-                  <TouchableOpacity
-                    key={`to-${acc.id}`}
-                    style={[styles.chip, toAccountId === acc.id && styles.chipActive]}
-                    onPress={() => {
-                      setToAccountId(acc.id);
-                      if (transferError) setTransferError(null);
-                    }}
-                    testID={`transfer-to-${acc.id}`}
-                  >
-                    <Text style={[styles.chipText, toAccountId === acc.id && styles.chipTextActive]}>
-                      {acc.icon} {acc.name} ({formatRp(acc.balance)})
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <ChipGroup<string>
+                options={accounts.map((acc) => ({
+                  value: acc.id,
+                  label: `${acc.icon} ${acc.name} (${formatRp(acc.balance)})`,
+                  testID: `transfer-to-${acc.id}`,
+                }))}
+                selected={toAccountId || null}
+                onSelect={(id) => {
+                  setToAccountId(id);
+                  if (transferError) setTransferError(null);
+                }}
+                layout="wrap"
+              />
 
               <Text style={styles.label}>Nominal Transfer (Rp)</Text>
               <TextInput
@@ -456,26 +463,26 @@ export function AccountsScreen(): React.JSX.Element {
               )}
 
               <View style={styles.footerRow}>
-                <TouchableOpacity
+                <PressableButton
+                  variant="ghost"
+                  size="md"
                   style={styles.cancelBtn}
                   onPress={() => setTransferModalVisible(false)}
                   disabled={transferring}
                   testID="transfer-cancel-btn"
                 >
-                  <Text style={styles.cancelBtnText}>Batal</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
+                  Batal
+                </PressableButton>
+                <PressableButton
+                  variant="primary"
+                  size="md"
                   style={styles.saveBtn}
                   onPress={handleTransferSubmit}
                   disabled={transferring}
                   testID="transfer-save-btn"
                 >
-                  {transferring ? (
-                    <ActivityIndicator color={COLORS.white} />
-                  ) : (
-                    <Text style={styles.saveBtnText}>Kirim Transfer</Text>
-                  )}
-                </TouchableOpacity>
+                  {transferring ? 'Mengirim...' : 'Kirim Transfer'}
+                </PressableButton>
               </View>
             </View>
           </ScrollView>
@@ -490,67 +497,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.md,
   },
-  heroCard: {
-    backgroundColor: COLORS.heroCocoa,
-    borderRadius: RADII.lg,
-    padding: SPACING.lg,
-    marginBottom: SPACING.md,
-    ...SHADOWS.hero,
+  statRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.heroSubtle,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 30,
+    backgroundColor: COLORS.heroDivider,
+    marginHorizontal: SPACING.md,
   },
   rowBetween: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: SPACING.sm,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-  },
-  heroBtnGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs + 2,
-  },
-  transferBtn: {
-    backgroundColor: COLORS.terracottaBtn,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: RADII.pill,
-  },
-  transferBtnText: {
-    color: COLORS.white,
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  heroKicker: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.heroSubtle,
-  },
-  heroAmount: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: COLORS.textOnDark,
-    marginVertical: 6,
-  },
-  heroSub: {
-    fontSize: 12,
-    color: COLORS.heroSubtle,
-  },
-  addBtn: {
-    backgroundColor: COLORS.sageBtn,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: RADII.pill,
-  },
-  addBtnText: {
-    color: COLORS.white,
-    fontWeight: '700',
-    fontSize: 12,
   },
   card: {
     backgroundColor: COLORS.surface,

@@ -1,14 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Modal,
-  Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { ProgressBar } from '../components/ProgressBar';
@@ -22,6 +17,9 @@ import {
 } from '../theme/tokens';
 import type { CategoryGoal } from '../types';
 import { formatMonthLabel, formatRp, parseIdrInput } from '../utils/format';
+import { ModalForm } from '../components/ModalForm';
+import { ChipGroup } from '../components/ChipGroup';
+import { PressableButton } from '../components/PressableButton';
 
 const EMOJI_PRESETS = ['✨', '🏡', '🎓', '👶', '🚗', '🩺', '🛍️', '🎁'] as const;
 
@@ -37,7 +35,6 @@ export function CategoriesScreen(): React.JSX.Element {
     requestConfirm,
     openNewTransaction,
   } = useDuaSaku();
-  const { height } = useWindowDimensions();
 
   const [showModal, setShowModal] = useState(false);
   const [editingCategory, setEditingCategory] = useState<CategoryGoal | null>(null);
@@ -137,14 +134,14 @@ export function CategoriesScreen(): React.JSX.Element {
             Aktivitas bulan {formatMonthLabel(selectedMonth)}
           </Text>
         </View>
-        <TouchableOpacity
-          style={styles.addBtn}
+        <PressableButton
+          variant="primary"
+          size="sm"
           onPress={openCreateModal}
-          accessibilityRole="button"
           testID="categories-add-btn"
         >
-          <Text style={styles.addBtnText}>+ Tambah Pos</Text>
-        </TouchableOpacity>
+          + Tambah Pos
+        </PressableButton>
       </View>
 
       {categories.length === 0 ? (
@@ -193,14 +190,14 @@ export function CategoriesScreen(): React.JSX.Element {
                   </View>
                 </View>
 
-                <TouchableOpacity
-                  style={styles.quickAddBtn}
+                <PressableButton
+                  variant="ghost"
+                  size="sm"
                   onPress={() => openNewTransaction('expense', undefined, cat.id)}
-                  accessibilityRole="button"
                   testID={`category-quick-add-${cat.id}`}
                 >
-                  <Text style={styles.quickAddText}>+ Catat</Text>
-                </TouchableOpacity>
+                  + Catat
+                </PressableButton>
               </View>
 
               <View style={styles.statsRow}>
@@ -250,129 +247,86 @@ export function CategoriesScreen(): React.JSX.Element {
       )}
 
       {showModal && (
-        <Modal
+        <ModalForm
           visible={showModal}
-          transparent
-          animationType={Platform.OS === 'web' ? 'none' : 'slide'}
-          onRequestClose={closeModal}
-          testID="category-modal"
-        >
-          <View
-            style={[
-              styles.modalBackdrop,
-              Platform.OS === 'web' ? { minHeight: height } : undefined,
-            ]}
-          >
-            <ScrollView
-              contentContainerStyle={styles.modalScroll}
-              keyboardShouldPersistTaps="handled"
-            >
-              <View style={styles.modalCard}>
-                <Text style={styles.modalTitle}>
-                  {editingCategory ? 'Edit Pos Keuangan' : 'Tambah Kategori / Pos Baru'}
-                </Text>
+          onClose={closeModal}
+          title={editingCategory ? 'Edit Pos Keuangan' : 'Tambah Kategori / Pos Baru'}
+          children={
+            <>
+              <Text style={styles.label}>Nama Kategori</Text>
+              <TextInput
+                style={styles.input}
+                value={catName}
+                onChangeText={(text) => {
+                  setCatName(text);
+                  if (formError) setFormError(null);
+                }}
+                placeholder="Contoh: Dana Darurat / Cicilan Rumah"
+                placeholderTextColor={COLORS.textPlaceholder}
+                testID="category-name-input"
+              />
 
-                <Text style={styles.label}>Nama Kategori</Text>
-                <TextInput
-                  style={styles.input}
-                  value={catName}
-                  onChangeText={(text) => {
-                    setCatName(text);
-                    if (formError) setFormError(null);
-                  }}
-                  placeholder="Contoh: Dana Darurat / Cicilan Rumah"
-                  placeholderTextColor={COLORS.textPlaceholder}
-                  testID="category-name-input"
-                />
+              <Text style={styles.label}>Ikon Emoji</Text>
+              <TextInput
+                style={styles.input}
+                value={catIcon}
+                onChangeText={setCatIcon}
+                placeholder="✨"
+                placeholderTextColor={COLORS.textPlaceholder}
+                maxLength={8}
+                testID="category-icon-input"
+              />
+              <ChipGroup
+                options={EMOJI_PRESETS.map((emoji) => ({ label: emoji, value: emoji }))}
+                selected={catIcon}
+                onSelect={setCatIcon}
+                layout="wrap"
+                testID="category-emoji-chips"
+              />
 
-                <Text style={styles.label}>Ikon Emoji</Text>
-                <TextInput
-                  style={styles.input}
-                  value={catIcon}
-                  onChangeText={setCatIcon}
-                  placeholder="✨"
-                  placeholderTextColor={COLORS.textPlaceholder}
-                  maxLength={8}
-                  testID="category-icon-input"
-                />
-                <View style={styles.presetRow}>
-                  {EMOJI_PRESETS.map((emoji) => (
-                    <TouchableOpacity
-                      key={emoji}
-                      style={[
-                        styles.emojiChip,
-                        catIcon === emoji && styles.emojiChipActive,
-                      ]}
-                      onPress={() => setCatIcon(emoji)}
-                    >
-                      <Text style={styles.emojiChipText}>{emoji}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Text style={styles.label}>Warna Aksen</Text>
-                <View style={styles.colorRow}>
-                  {CATEGORY_COLOR_PRESETS.map((preset, idx) => (
-                    <TouchableOpacity
-                      key={preset}
-                      style={[
-                        styles.colorSwatch,
-                        { backgroundColor: preset },
-                        catColor === preset && styles.colorSwatchActive,
-                      ]}
-                      onPress={() => setCatColor(preset)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Pilih warna ${preset}`}
-                      testID={`category-color-${idx}`}
-                    />
-                  ))}
-                </View>
-
-                <Text style={styles.label}>Target Anggaran (Opsional)</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  value={catTarget}
-                  onChangeText={setCatTarget}
-                  placeholder="Contoh: 25000000"
-                  placeholderTextColor={COLORS.textPlaceholder}
-                  testID="category-target-input"
-                />
-
-                {!!formError && (
-                  <View style={styles.inlineErrorBox}>
-                    <Text style={styles.inlineErrorText}>{formError}</Text>
-                  </View>
-                )}
-
-                <View style={styles.modalActions}>
+              <Text style={styles.label}>Warna Aksen</Text>
+              <View style={styles.colorRow}>
+                {CATEGORY_COLOR_PRESETS.map((preset, idx) => (
                   <TouchableOpacity
-                    style={styles.cancelBtn}
-                    onPress={closeModal}
-                    disabled={loading}
-                    testID="category-cancel-btn"
-                  >
-                    <Text style={styles.cancelBtnText}>Batal</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.saveBtn, loading && styles.saveBtnDisabled]}
-                    onPress={handleSave}
-                    disabled={loading}
-                    testID="category-save-btn"
-                  >
-                    {loading ? (
-                      <ActivityIndicator color={COLORS.white} size="small" />
-                    ) : (
-                      <Text style={styles.saveBtnText}>
-                        {editingCategory ? 'Simpan Perubahan' : 'Tambah Pos'}
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
+                    key={preset}
+                    style={[
+                      styles.colorSwatch,
+                      { backgroundColor: preset },
+                      catColor === preset && styles.colorSwatchActive,
+                    ]}
+                    onPress={() => setCatColor(preset)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Pilih warna ${preset}`}
+                    testID={`category-color-${idx}`}
+                  />
+                ))}
               </View>
-            </ScrollView>
-          </View>
-        </Modal>
+
+              <Text style={styles.label}>Target Anggaran (Opsional)</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="numeric"
+                value={catTarget}
+                onChangeText={setCatTarget}
+                placeholder="Contoh: 25000000"
+                placeholderTextColor={COLORS.textPlaceholder}
+                testID="category-target-input"
+              />
+
+              {!!formError && (
+                <View style={styles.inlineErrorBox}>
+                  <Text style={styles.inlineErrorText}>{formError}</Text>
+                </View>
+              )}
+            </>
+          }
+          onSubmit={handleSave}
+          submitting={loading}
+          submitLabel={editingCategory ? 'Simpan Perubahan' : 'Tambah Pos'}
+          cancelLabel="Batal"
+          submitTestID="category-save-btn"
+          cancelTestID="category-cancel-btn"
+        />
       )}
     </View>
   );
@@ -494,19 +448,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.textMuted,
   },
-  quickAddBtn: {
-    backgroundColor: COLORS.terracottaSoft,
-    borderWidth: 1,
-    borderColor: COLORS.terracotta,
-    borderRadius: RADII.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs + 2,
-  },
-  quickAddText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.terracottaDark,
-  },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -572,33 +513,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.terracottaDark,
   },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: COLORS.backdrop,
-    justifyContent: 'center',
-    padding: SPACING.lg,
-  },
-  modalScroll: {
-    flexGrow: 1,
-    justifyContent: 'center',
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 480,
-    alignSelf: 'center',
-    backgroundColor: COLORS.surface,
-    borderRadius: RADII.xl,
-    padding: SPACING.xl,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    ...SHADOWS.elevated,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.lg,
-  },
   label: {
     fontSize: 13,
     fontWeight: '700',
@@ -615,29 +529,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textPrimary,
     marginBottom: SPACING.md,
-  },
-  presetRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
-  },
-  emojiChip: {
-    width: 38,
-    height: 38,
-    borderRadius: RADII.md,
-    backgroundColor: COLORS.warmSand,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  emojiChipActive: {
-    backgroundColor: COLORS.terracottaSoft,
-    borderColor: COLORS.terracotta,
-  },
-  emojiChipText: {
-    fontSize: 18,
   },
   colorRow: {
     flexDirection: 'row',
@@ -669,44 +560,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: COLORS.terracottaDark,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: SPACING.sm,
-    marginTop: SPACING.xs,
-  },
-  cancelBtn: {
-    paddingVertical: SPACING.sm + 2,
-    paddingHorizontal: SPACING.lg,
-    borderRadius: RADII.md,
-    backgroundColor: COLORS.warmSand,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    minHeight: 42,
-    justifyContent: 'center',
-  },
-  cancelBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  saveBtn: {
-    backgroundColor: COLORS.terracottaBtn,
-    borderRadius: RADII.md,
-    paddingVertical: SPACING.sm + 2,
-    paddingHorizontal: SPACING.lg,
-    minHeight: 42,
-    minWidth: 120,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveBtnDisabled: {
-    opacity: 0.65,
-  },
-  saveBtnText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: COLORS.white,
   },
 });

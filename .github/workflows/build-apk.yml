@@ -1,64 +1,96 @@
-name: Build DuaSaku Android APK
+name: Build Android APK/AAB
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
-      api_url:
-        description: 'Backend API URL untuk APK (default: https://duasaku-api.vercel.app)'
-        required: false
-        default: 'https://duasaku-api.vercel.app'
+      profile:
+        type: choice
+        description: Build profile
+        options: [preview, production]
+        default: preview
+
+permissions:
+  contents: read
 
 jobs:
-  build-apk:
+  build:
+    name: Build ${{ github.event.inputs.profile || 'preview' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Setup Java 17 (Temurin)
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Verify pre-installed Android SDK & accept licenses
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls -la "$ANDROID_HOME"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          cache: 'npm'
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci
 
-      - name: Generate Android native project (Expo Prebuild)
-        env:
-          EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://duasaku-api.vercel.app' }}
-        run: npx expo prebuild --platform android --non-interactive
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build Standalone Release APK
+      - name: Configure EAS project
+        run: eas build:configure --non-interactive
         env:
-          EXPO_PUBLIC_API_URL: ${{ github.event.inputs.api_url || 'https://duasaku-api.vercel.app' }}
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android
         run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          echo "Building profile: $PROFILE"
+          eas build --profile "$PROFILE" --platform android --non-interactive --no-wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Verify APK output
-        run: ls -lh android/app/build/outputs/apk/release/
+      - name: Wait for build
+        run: |
+          PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          BUILD_URL=$(eas build:list --profile "$PROFILE" --platform android --limit 1 --json | jq -r '.[0].buildDetailsPageUrl')
+          echo "Build URL: $BUILD_URL"
+          eas build:wait --id $(eas build:list --profile "$PROFILE" --platform android --limit 1 --json | jq -r '.[0].id')
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Upload DuaSaku APK Artifact
+      - name: Upload artifact (preview APK)
+        if: github.event.inputs.profile == 'preview' || github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: DuaSaku-Android-APK
-          path: android/app/build/outputs/apk/release/*.apk
+          name: duasaku-preview-apk
+          path: |
+            **/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
+
+  submit:
+    name: Submit to Play Store
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Submit to Play Store
+        run: eas submit --profile production --platform android --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}

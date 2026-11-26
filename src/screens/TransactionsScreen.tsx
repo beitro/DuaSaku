@@ -4,13 +4,15 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import type { TransactionType } from '../types';
 import { formatMonthLabel, formatRp, formatSignedRp, parseIdrInput } from '../utils/format';
+import { DashboardHero, HeroStatRow } from '../components/DashboardHero';
+import { PressableButton } from '../components/PressableButton';
+import { ChipGroup } from '../components/ChipGroup';
 
 export function TransactionsScreen(): React.JSX.Element {
   const {
@@ -65,24 +67,28 @@ export function TransactionsScreen(): React.JSX.Element {
 
   return (
     <View style={styles.container} testID="transactions-screen">
-      {/* Header & Summary */}
-      <View style={styles.summaryCard}>
-        <View style={styles.rowBetween}>
-          <Text style={styles.title}>
-            Transaksi — {formatMonthLabel(selectedMonth)}
-          </Text>
-          <TouchableOpacity
-            style={styles.addBtn}
-            onPress={() => openNewTransaction('expense')}
-          >
-            <Text style={styles.addBtnText}>+ Catat</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.totalsRow}>
-          <Text style={styles.incomeText}>Masuk: {formatRp(monthTotals.income)}</Text>
-          <Text style={styles.expenseText}>Keluar: {formatRp(monthTotals.expense)}</Text>
-        </View>
-      </View>
+      {/* Header & Summary — DashboardHero */}
+      <DashboardHero
+        kicker={`Transaksi — ${formatMonthLabel(selectedMonth)}`}
+        subtitle={
+          <HeroStatRow
+            items={[
+              { label: 'Masuk', value: formatRp(monthTotals.income), tone: 'income' },
+              { label: 'Keluar', value: formatRp(monthTotals.expense), tone: 'expense' },
+            ]}
+          />
+        }
+        primaryActions={[
+          {
+            label: '+ Catat',
+            onPress: () => openNewTransaction('expense'),
+            variant: 'primary',
+            size: 'sm',
+          },
+        ]}
+        padding="lg"
+        testID="transactions-hero"
+      />
 
       {/* Search & Filters */}
       <View style={styles.searchRow}>
@@ -94,41 +100,35 @@ export function TransactionsScreen(): React.JSX.Element {
           placeholderTextColor={COLORS.textPlaceholder}
           testID="transactions-search-input"
         />
-        <TouchableOpacity
-          style={[styles.advToggleBtn, showAdvancedFilter && styles.advToggleBtnActive]}
+        <PressableButton
+          variant="ghost"
+          size="sm"
+          style={[styles.advToggleBtn, showAdvancedFilter && styles.advToggleBtnActive].flat() as any}
           onPress={() => setShowAdvancedFilter((v) => !v)}
           testID="transactions-adv-filter-btn"
         >
-          <Text style={[styles.advToggleText, showAdvancedFilter && styles.advToggleTextActive]}>
+          <Text style={[styles.advToggleText, showAdvancedFilter && styles.advToggleTextActive].flat() as any}>
             Filter
           </Text>
-        </TouchableOpacity>
+        </PressableButton>
       </View>
 
       {showAdvancedFilter && (
         <View style={styles.advPanel} testID="transactions-adv-panel">
           <Text style={styles.advLabel}>Kategori</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: SPACING.sm }}>
-            <TouchableOpacity
-              style={[styles.chip, categoryFilter === 'all' && styles.chipActive]}
-              onPress={() => setCategoryFilter('all')}
-            >
-              <Text style={[styles.chipText, categoryFilter === 'all' && styles.chipTextActive]}>
-                Semua Kategori
-              </Text>
-            </TouchableOpacity>
-            {categories.map((c) => (
-              <TouchableOpacity
-                key={c.id}
-                style={[styles.chip, categoryFilter === c.id && styles.chipActive]}
-                onPress={() => setCategoryFilter(c.id)}
-              >
-                <Text style={[styles.chipText, categoryFilter === c.id && styles.chipTextActive]}>
-                  {c.icon} {c.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          <ChipGroup<string>
+            options={[
+              { value: 'all', label: 'Semua Kategori' },
+              ...categories.map((c) => ({
+                value: c.id,
+                label: `${c.icon} ${c.name}`,
+              })),
+            ]}
+            selected={categoryFilter}
+            onSelect={setCategoryFilter}
+            layout="scroll"
+            testID="transactions-category-filter"
+          />
           <Text style={styles.advLabel}>Rentang Nominal (Rp)</Text>
           <View style={styles.rangeRow}>
             <TextInput
@@ -153,57 +153,45 @@ export function TransactionsScreen(): React.JSX.Element {
         </View>
       )}
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow}>
-        <TouchableOpacity
-          style={[styles.chip, partnerFilter === 'all' && styles.chipActive]}
-          onPress={() => setPartnerFilter('all')}
-        >
-          <Text style={[styles.chipText, partnerFilter === 'all' && styles.chipTextActive]}>
-            Semua Pasangan
-          </Text>
-        </TouchableOpacity>
-        {(couple?.partners || []).map((p) => (
-          <TouchableOpacity
-            key={p.id}
-            style={[styles.chip, partnerFilter === p.id && styles.chipActive]}
-            onPress={() => setPartnerFilter(p.id)}
-          >
-            <Text style={[styles.chipText, partnerFilter === p.id && styles.chipTextActive]}>
-              {p.name}
-            </Text>
-          </TouchableOpacity>
-        ))}
-        {(['all', 'expense', 'income'] as const).map((t) => (
-          <TouchableOpacity
-            key={t}
-            style={[styles.chip, typeFilter === t && styles.chipActive]}
-            onPress={() => setTypeFilter(t)}
-          >
-            <Text style={[styles.chipText, typeFilter === t && styles.chipTextActive]}>
-              {t === 'all' ? 'Semua Tipe' : t === 'income' ? 'Pemasukan' : 'Pengeluaran'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-        <TouchableOpacity
-          style={[styles.chip, accountFilter === 'all' && styles.chipActive]}
-          onPress={() => setAccountFilter('all')}
-        >
-          <Text style={[styles.chipText, accountFilter === 'all' && styles.chipTextActive]}>
-            Semua Dompet
-          </Text>
-        </TouchableOpacity>
-        {accounts.map((a) => (
-          <TouchableOpacity
-            key={a.id}
-            style={[styles.chip, accountFilter === a.id && styles.chipActive]}
-            onPress={() => setAccountFilter(a.id)}
-          >
-            <Text style={[styles.chipText, accountFilter === a.id && styles.chipTextActive]}>
-              {a.icon} {a.name}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <View style={styles.filterRow}>
+        <ChipGroup<string>
+          options={[
+            { value: 'all', label: 'Semua Pasangan' },
+            ...(couple?.partners || []).map((p) => ({
+              value: p.id,
+              label: p.name,
+            })),
+          ]}
+          selected={partnerFilter}
+          onSelect={setPartnerFilter}
+          layout="scroll"
+          testID="transactions-partner-filter"
+        />
+        <ChipGroup<'all' | TransactionType>
+          options={[
+            { value: 'all', label: 'Semua Tipe' },
+            { value: 'expense', label: 'Pengeluaran' },
+            { value: 'income', label: 'Pemasukan' },
+          ]}
+          selected={typeFilter}
+          onSelect={setTypeFilter}
+          layout="scroll"
+          testID="transactions-type-filter"
+        />
+        <ChipGroup<string>
+          options={[
+            { value: 'all', label: 'Semua Dompet' },
+            ...accounts.map((a) => ({
+              value: a.id,
+              label: `${a.icon} ${a.name}`,
+            })),
+          ]}
+          selected={accountFilter}
+          onSelect={setAccountFilter}
+          layout="scroll"
+          testID="transactions-account-filter"
+        />
+      </View>
 
       {/* Transaction List */}
       {filtered.length === 0 ? (
@@ -231,21 +219,25 @@ export function TransactionsScreen(): React.JSX.Element {
             </Text>
             {!!tx.note && <Text style={styles.txNote}>{tx.note}</Text>}
             <View style={styles.txActions}>
-              <TouchableOpacity
-                style={styles.actionPill}
+              <PressableButton
+                variant="ghost"
+                size="sm"
                 onPress={() => openNewTransaction(tx.type, tx.amount, tx.categoryId)}
                 testID={`tx-duplicate-${tx.id}`}
               >
                 <Text style={styles.actionPillText}>Catat Lagi</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.actionPill}
+              </PressableButton>
+              <PressableButton
+                variant="ghost"
+                size="sm"
                 onPress={() => openEditTransaction(tx)}
               >
                 <Text style={styles.actionPillText}>Edit</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionPill, styles.deletePill]}
+              </PressableButton>
+              <PressableButton
+                variant="ghost"
+                size="sm"
+                style={styles.deletePill}
                 onPress={() =>
                   requestConfirm({
                     title: 'Hapus Transaksi?',
@@ -256,8 +248,8 @@ export function TransactionsScreen(): React.JSX.Element {
                   })
                 }
               >
-                <Text style={styles.deletePillText}>Hapus</Text>
-              </TouchableOpacity>
+                <Text style={[styles.deletePillText].flat() as any}>Hapus</Text>
+              </PressableButton>
             </View>
           </View>
         ))
