@@ -24,6 +24,7 @@ import {
 import { parseReceiptLocally } from '../utils/receiptParser';
 import { CalculatorKeypad } from './CalculatorKeypad';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Animated } from 'react-native';
 
 export function QuickEntrySheet(): React.JSX.Element | null {
   const {
