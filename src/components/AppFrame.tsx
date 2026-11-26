@@ -20,8 +20,10 @@ export function AppFrame({
   maxWidth = 420,
   backgroundColor = COLORS.bgCream,
 }: AppFrameProps): React.JSX.Element {
-  const { width } = useWindowDimensions();
-  const isWide = width > maxWidth + 32;
+  const { width, height } = useWindowDimensions();
+  const isLandscape = width > height;
+  const effectiveMax = isLandscape ? Math.min(width - 32, 720) : maxWidth;
+  const isWide = width > effectiveMax + 32;
   const androidTopInset = Platform.OS === 'android' ? StatusBar.currentHeight ?? 0 : 0;
 
   return (
@@ -39,7 +41,7 @@ export function AppFrame({
           styles.inner,
           { backgroundColor },
           isWide && {
-            maxWidth,
+            maxWidth: effectiveMax,
             width: '100%',
             alignSelf: 'center',
             borderLeftWidth: 1,
