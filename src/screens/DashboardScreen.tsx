@@ -1,6 +1,7 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
+import { DashboardHero, HeroStatRow } from '../components/DashboardHero';
 import { COLORS, QUICK_AMOUNT_PRESETS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import { formatMonthLabel, formatRp } from '../utils/format';
 
@@ -23,29 +24,18 @@ export function DashboardScreen(): React.JSX.Element {
   return (
     <View style={styles.container} testID="dashboard-screen">
       {/* Hero Balance Card */}
-      <View style={styles.heroCard}>
-        <Text style={styles.heroKicker}>
-          Saldo Bersih — {formatMonthLabel(selectedMonth)}
-        </Text>
-        <Text style={styles.heroAmount}>
-          {formatRp(summary?.netBalance ?? 0)}
-        </Text>
-        <View style={styles.heroRow}>
-          <View style={styles.heroStat}>
-            <Text style={styles.heroLabel}>Pemasukan</Text>
-            <Text style={styles.heroIncome}>
-              {formatRp(summary?.totalIncome ?? 0)}
-            </Text>
-          </View>
-          <View style={styles.heroDivider} />
-          <View style={styles.heroStat}>
-            <Text style={styles.heroLabel}>Pengeluaran</Text>
-            <Text style={styles.heroExpense}>
-              {formatRp(summary?.totalExpense ?? 0)}
-            </Text>
-          </View>
-        </View>
-      </View>
+      <DashboardHero
+        kicker={`Saldo Bersih — ${formatMonthLabel(selectedMonth)}`}
+        amount={formatRp(summary?.netBalance ?? 0)}
+        padding="xl"
+      >
+        <HeroStatRow
+          items={[
+            { label: 'Pemasukan', value: formatRp(summary?.totalIncome ?? 0), tone: 'income' },
+            { label: 'Pengeluaran', value: formatRp(summary?.totalExpense ?? 0), tone: 'expense' },
+          ]}
+        />
+      </DashboardHero>
 
       {/* Money-Tracker Quick Shortcuts */}
       <View style={styles.card}>

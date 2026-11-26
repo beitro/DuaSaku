@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
+import { DashboardHero } from '../components/DashboardHero';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import { formatMonthLabel, formatRp } from '../utils/format';
 
@@ -18,8 +19,7 @@ export function AnalyticsScreen(): React.JSX.Element {
   return (
     <View style={styles.container} testID="analytics-screen">
       {/* Monthly Overview */}
-      <View style={styles.heroCard}>
-        <Text style={styles.heroKicker}>Analitik — {formatMonthLabel(selectedMonth)}</Text>
+      <DashboardHero kicker={`Analitik — ${formatMonthLabel(selectedMonth)}`}>
         <View style={styles.kpiGrid}>
           <View style={styles.kpiItem}>
             <Text style={styles.kpiLabel}>Pemasukan</Text>
@@ -38,7 +38,7 @@ export function AnalyticsScreen(): React.JSX.Element {
             <Text style={styles.kpiLight}>{totals.transactionCount}x</Text>
           </View>
         </View>
-      </View>
+      </DashboardHero>
 
       {/* Category Breakdown */}
       <Text style={styles.sectionTitle}>Rincian per Kategori / Pos</Text>

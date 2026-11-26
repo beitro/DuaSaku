@@ -1,14 +1,9 @@
 import React, { useState } from 'react';
 import {
-  ActivityIndicator,
-  Modal,
-  Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
@@ -16,6 +11,9 @@ import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import type { MonthlyBudget } from '../types';
 import { formatMonthLabel, formatRp, parseIdrInput } from '../utils/format';
 import { RecurringBillsPanel } from '../components/RecurringBillsPanel';
+import { DashboardHero } from '../components/DashboardHero';
+import { ChipGroup } from '../components/ChipGroup';
+import { ModalForm } from '../components/ModalForm';
 
 export function BudgetsScreen(): React.JSX.Element {
   const {
@@ -29,7 +27,6 @@ export function BudgetsScreen(): React.JSX.Element {
     requestConfirm,
     showError,
   } = useDuaSaku();
-  const { height } = useWindowDimensions();
 
   const [subTab, setSubTab] = useState<'budgets' | 'recurring'>('budgets');
   const [modalVisible, setModalVisible] = useState(false);
@@ -110,19 +107,16 @@ export function BudgetsScreen(): React.JSX.Element {
       ) : (
         <>
           {/* Monthly Budget Hero */}
-      <View style={styles.heroCard}>
-        <View style={styles.rowBetween}>
-          <Text style={styles.heroKicker}>Anggaran — {formatMonthLabel(selectedMonth)}</Text>
+      <DashboardHero
+        kicker={`Anggaran — ${formatMonthLabel(selectedMonth)}`}
+        amount={formatRp(budgetTotals.totalRemaining)}
+        subtitle={`Sisa dari total batas ${formatRp(budgetTotals.totalLimit)} · Terpakai ${formatRp(budgetTotals.totalSpent)} (${overallPct}%)`}
+        actions={
           <TouchableOpacity style={styles.addBtn} onPress={openCreate} testID="add-budget-btn">
             <Text style={styles.addBtnText}>+ Atur Anggaran</Text>
           </TouchableOpacity>
-        </View>
-        <Text style={styles.heroAmount}>{formatRp(budgetTotals.totalRemaining)}</Text>
-        <Text style={styles.heroSub}>
-          Sisa dari total batas {formatRp(budgetTotals.totalLimit)} · Terpakai{' '}
-          {formatRp(budgetTotals.totalSpent)} ({overallPct}%)
-        </Text>
-      </View>
+        }
+      />
 
       {/* Budget List */}
       {budgets.length === 0 ? (
@@ -191,62 +185,35 @@ export function BudgetsScreen(): React.JSX.Element {
       )}
 
       {/* Modal Set / Edit Budget */}
-      <Modal
+      <ModalForm
         visible={modalVisible}
-        transparent
-        animationType={Platform.OS === 'web' ? 'none' : 'slide'}
-        onRequestClose={() => setModalVisible(false)}
+        onClose={() => setModalVisible(false)}
+        title={editing ? `Ubah Batas: ${editing.categoryName}` : `Atur Anggaran (${formatMonthLabel(selectedMonth)})`}
+        onSubmit={handleSave}
+        submitting={submitting}
+        submitTestID="budget-save-btn"
       >
-        <View style={[styles.backdrop, Platform.OS === 'web' ? { minHeight: height } : undefined]}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>
-              {editing ? `Ubah Batas: ${editing.categoryName}` : `Atur Anggaran (${formatMonthLabel(selectedMonth)})`}
-            </Text>
-
-            {!editing && (
-              <>
-                <Text style={styles.label}>Pilih Kategori</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
-                  {categories.map((cat) => (
-                    <TouchableOpacity
-                      key={cat.id}
-                      style={[styles.chip, categoryId === cat.id && styles.chipActive]}
-                      onPress={() => setCategoryId(cat.id)}
-                    >
-                      <Text style={[styles.chipText, categoryId === cat.id && styles.chipTextActive]}>
-                        {cat.icon} {cat.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </>
-            )}
-
-            <Text style={styles.label}>Batas Anggaran Bulanan (Rp)</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="numeric"
-              value={limitInput}
-              onChangeText={setLimitInput}
-              placeholder="Contoh: 5000000"
-              placeholderTextColor={COLORS.textPlaceholder}
+        {!editing && (
+          <>
+            <Text style={styles.label}>Pilih Kategori</Text>
+            <ChipGroup
+              options={categories.map((cat) => ({ value: cat.id, label: `${cat.icon} ${cat.name}` }))}
+              selected={categoryId}
+              onSelect={setCategoryId}
             />
+          </>
+        )}
 
-            <View style={styles.footerRow}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
-                <Text style={styles.cancelBtnText}>Batal</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={submitting}>
-                {submitting ? (
-                  <ActivityIndicator color={COLORS.white} />
-                ) : (
-                  <Text style={styles.saveBtnText}>Simpan</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        <Text style={styles.label}>Batas Anggaran Bulanan (Rp)</Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="numeric"
+          value={limitInput}
+          onChangeText={setLimitInput}
+          placeholder="Contoh: 5000000"
+          placeholderTextColor={COLORS.textPlaceholder}
+        />
+      </ModalForm>
         </>
       )}
     </View>

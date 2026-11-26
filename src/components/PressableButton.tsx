@@ -27,6 +27,8 @@ interface PressableButtonProps {
   accessibilityHint?: string;
   /** Optional testID */
   testID?: string;
+  /** Optional style to merge with internal styles */
+  style?: ViewStyle;
 }
 
 const VARIANT_STYLES: Record<Variant, ViewStyle> = {
@@ -64,6 +66,7 @@ export const PressableButton = React.forwardRef<React.ComponentRef<typeof Pressa
     accessibilityLabel,
     accessibilityHint,
     testID,
+    style,
   },
   ref
 ) {
@@ -90,6 +93,7 @@ export const PressableButton = React.forwardRef<React.ComponentRef<typeof Pressa
         },
         !disableFeedback && pressed && styles.pressed,
         disabled && styles.disabled,
+        style,
       ]}
     >
       {!!loadingLabel && (

@@ -1,67 +1,69 @@
 import React from 'react';
-import { Modal, View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
-import type { ViewStyle } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import type { StyleProp, ViewStyle } from 'react-native';
 import { PressableButton } from './PressableButton';
-import { COLORS, SPACING, RADII, SHADOWS } from '../theme/tokens';
+import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 
-interface ModalFormProps {
-  /** Whether modal is visible */
+export interface ModalFormProps {
   visible: boolean;
-  /** Callback when modal should close */
   onClose: () => void;
-  /** Modal title */
   title: string;
-  /** Form content */
   children: React.ReactNode;
-  /** Submit handler */
-  onSubmit: () => Promise<void>;
-  /** Submit button label */
+  onSubmit: () => void | Promise<void>;
   submitLabel?: string;
-  /** Cancel button label */
   cancelLabel?: string;
-  /** Whether submit is in progress */
   submitting?: boolean;
-  /** Whether to show close button in header */
   showCloseButton?: boolean;
-  /** Custom style for modal card */
-  cardStyle?: ViewStyle;
+  cardStyle?: StyleProp<ViewStyle>;
+  testID?: string;
+  submitTestID?: string;
+  cancelTestID?: string;
 }
 
-export const ModalForm = React.forwardRef<
-  { close: () => void },
-  ModalFormProps
->(function (
-  {
-    visible,
-    onClose,
-    title,
-    children,
-    onSubmit,
-    submitLabel = 'Simpan',
-    cancelLabel = 'Batal',
-    submitting = false,
-    showCloseButton = true,
-    cardStyle,
-  },
-  ref,
-) {
-  const close = () => onClose();
+export function ModalForm({
+  visible,
+  onClose,
+  title,
+  children,
+  onSubmit,
+  submitLabel = 'Simpan',
+  cancelLabel = 'Batal',
+  submitting = false,
+  showCloseButton = true,
+  cardStyle,
+  testID,
+  submitTestID,
+  cancelTestID,
+}: ModalFormProps): React.JSX.Element | null {
+  const { height } = useWindowDimensions();
+  if (!visible) return null;
 
-  // Expose close method to parent via ref
-  React.useImperativeHandle(ref, () => ({ close }));
+  const handleClose = () => {
+    if (!submitting) onClose();
+  };
 
   return (
     <Modal
       visible={visible}
       transparent
       animationType={Platform.OS === 'web' ? 'none' : 'slide'}
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
+      testID={testID}
     >
-      <View style={styles.backdrop}>
+      <View style={[styles.backdrop, Platform.OS === 'web' ? { minHeight: height } : undefined]}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardAvoiding}
-          keyboardVerticalOffset={0}
         >
           <ScrollView
             contentContainerStyle={styles.modalScroll}
@@ -75,12 +77,11 @@ export const ModalForm = React.forwardRef<
                   <PressableButton
                     variant="ghost"
                     size="sm"
-                    onPress={onClose}
+                    onPress={handleClose}
                     disabled={submitting}
-                    accessibilityLabel="Tutup modal"
-                    accessibilityHint="Kembali ke layar sebelumnya"
+                    accessibilityLabel="Tutup"
                   >
-                    <Text style={{ color: COLORS.textMuted }}>✕</Text>
+                    <Text style={styles.closeX}>✕</Text>
                   </PressableButton>
                 )}
               </View>
@@ -91,23 +92,27 @@ export const ModalForm = React.forwardRef<
                 <PressableButton
                   variant="ghost"
                   size="md"
-                  onPress={onClose}
+                  onPress={handleClose}
                   disabled={submitting}
                   accessibilityLabel={cancelLabel}
+                  testID={cancelTestID}
                 >
-                  <Text style={{ color: COLORS.textSecondary }}>{cancelLabel}</Text>
+                  <Text style={styles.cancelText}>{cancelLabel}</Text>
                 </PressableButton>
                 <PressableButton
                   variant="primary"
                   size="md"
-                  onPress={onSubmit}
+                  onPress={() => {
+                    void onSubmit();
+                  }}
                   disabled={submitting}
                   accessibilityLabel={submitLabel}
+                  testID={submitTestID}
                 >
                   {submitting ? (
                     <ActivityIndicator color={COLORS.white} size="small" />
                   ) : (
-                    <Text style={{ color: COLORS.white }}>{submitLabel}</Text>
+                    <Text style={styles.submitText}>{submitLabel}</Text>
                   )}
                 </PressableButton>
               </View>
@@ -117,15 +122,12 @@ export const ModalForm = React.forwardRef<
       </View>
     </Modal>
   );
-});
-
-ModalForm.displayName = 'ModalForm';
+}
 
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: COLORS.backdrop,
-    justifyContent: 'center',
     padding: SPACING.lg,
   },
   keyboardAvoiding: {
@@ -134,7 +136,7 @@ const styles = StyleSheet.create({
   modalScroll: {
     flexGrow: 1,
     justifyContent: 'center',
-    paddingBottom: SPACING.xl,
+    paddingVertical: SPACING.lg,
   },
   modalCard: {
     width: '100%',
@@ -151,20 +153,37 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.md,
+    gap: SPACING.sm,
   },
   title: {
+    flex: 1,
     fontSize: 18,
     fontWeight: '800',
     color: COLORS.textPrimary,
+  },
+  closeX: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textMuted,
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: SPACING.md,
-    marginTop: SPACING.xl,
+    marginTop: SPACING.md,
     paddingTop: SPACING.md,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
+  },
+  cancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  submitText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.white,
   },
 });
