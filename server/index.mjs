@@ -1,7 +1,7 @@
 import express from 'express';
 import pg from 'pg';
 import dotenv from 'dotenv';
-import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -906,10 +906,43 @@ function seedCoupleDefaultsMem(coupleId, nowMs) {
 const makeInviteCode = () => randomBytes(3).toString('hex').toUpperCase();
 const makeToken = () => randomBytes(24).toString('base64url');
 
+const JWT_SECRET = process.env.JWT_SECRET || '';
+function verifySharedJwt(token) {
+  if (!JWT_SECRET) return null;
+  const parts = String(token || '').split('.');
+  if (parts.length !== 3) return null;
+  const [h, p, s] = parts;
+  const expected = createHmac('sha256', JWT_SECRET).update(h + '.' + p).digest('base64url');
+  try {
+    if (!timingSafeEqual(Buffer.from(s), Buffer.from(expected))) return null;
+  } catch { return null; }
+  let payload; try { payload = JSON.parse(Buffer.from(p, 'base64url').toString()); } catch { return null; }
+  if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+  return payload;
+}
+
 const authPartner = asyncHandler(async (req, res, next) => {
   const header = req.get('authorization') || '';
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   if (!token) return res.status(401).json({ error: 'Token pasangan wajib disertakan.' });
+
+  // Try shared backend JWT first
+  const jwtPayload = verifySharedJwt(token);
+  if (jwtPayload && jwtPayload.email) {
+    if (pool) {
+      const r = await pool.query('SELECT * FROM partners WHERE email = $1', [jwtPayload.email.toLowerCase()]);
+      if (r.rowCount) {
+        req.partner = {
+          id: r.rows[0].id,
+          coupleId: r.rows[0].couple_id,
+          name: r.rows[0].name,
+          roleLabel: r.rows[0].role_label,
+          avatarColor: r.rows[0].avatar_color,
+        };
+        return next();
+      }
+    }
+  }
 
   if (pool) {
     const r = await pool.query('SELECT * FROM partners WHERE token = $1', [token]);
