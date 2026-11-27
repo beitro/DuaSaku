@@ -2,33 +2,37 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppFrame } from '../components/AppFrame';
 import { PressableButton } from '../components/PressableButton';
+import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SPACING, TYPOGRAPHY } from '../theme/tokens';
 
-const SECTIONS = [
-  { key: 'about', label: 'Tentang' },
-  { key: 'currency', label: 'Mata Uang' },
-  { key: 'preference', label: 'Preferensi' },
-  { key: 'security', label: 'Keamanan' },
-  { key: 'notifications', label: 'Notifikasi' },
-  { key: 'budget', label: 'Anggaran' },
-  { key: 'category', label: 'Kategori' },
-  { key: 'accounts', label: 'Akun' },
-  { key: 'space', label: 'Ruang Pasangan' },
+const SECTIONS: { key: string; label: string; desc: string }[] = [
+  { key: 'profile', label: 'Profil', desc: 'Nama, avatar, peran' },
+  { key: 'currency', label: 'Mata Uang', desc: 'Pilih mata uang tampilan' },
+  { key: 'preference', label: 'Preferensi', desc: 'Tema, format tanggal' },
+  { key: 'security', label: 'Keamanan', desc: 'Kunci aplikasi, PIN' },
+  { key: 'notifications', label: 'Notifikasi', desc: 'Peringatan anggaran & pengingat' },
+  { key: 'budget', label: 'Anggaran', desc: 'Batas bulanan' },
+  { key: 'category', label: 'Kategori', desc: 'Kelola kategori' },
+  { key: 'accounts', label: 'Akun', desc: 'Dompet & rekening' },
+  { key: 'space', label: 'Ruang Pasangan', desc: 'Kode undangan, keluar' },
+  { key: 'about', label: 'Tentang', desc: 'Versi, kebijakan' },
 ];
 
 export function SettingsScreen(): React.JSX.Element {
+  const { me, logout } = useDuaSaku();
   return (
     <AppFrame>
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={TYPOGRAPHY.title}>Pengaturan</Text>
+        {me && <Text style={TYPOGRAPHY.caption}>Halo, {me.name}</Text>}
         {SECTIONS.map((s) => (
           <View key={s.key} style={styles.card}>
             <Text style={TYPOGRAPHY.cardTitle}>{s.label}</Text>
-            <Text style={TYPOGRAPHY.caption}>Konfigurasi {s.label.toLowerCase()} di sini.</Text>
+            <Text style={TYPOGRAPHY.caption}>{s.desc}</Text>
           </View>
         ))}
-        <PressableButton variant="ghost" size="md" onPress={() => {}}>
-          Kembali
+        <PressableButton variant="danger" size="md" onPress={logout}>
+          Keluar dari Ruang
         </PressableButton>
       </ScrollView>
     </AppFrame>
