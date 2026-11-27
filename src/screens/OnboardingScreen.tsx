@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -262,7 +263,13 @@ export function OnboardingScreen(): React.JSX.Element {
 
               {/* Logo / badge area */}
               <View style={styles.genZBadge}>
-                <Text style={styles.genZBadgeText}>💑 DUASAKU</Text>
+                <Image
+                  source={require('../../assets/logo.png')}
+                  style={styles.brandLogo}
+                  resizeMode="contain"
+                  accessibilityLabel="Logo DuaSaku"
+                />
+                <Text style={styles.genZBadgeText}>DUASAKU</Text>
               </View>
               <Text style={styles.genZHeadline}>{'Duit Berdua,\nNo Drama. 💸'}</Text>
               <Text style={styles.genZSubtext}>
@@ -1236,13 +1243,22 @@ const styles = StyleSheet.create({
   // Gen Z new styles
   genZBadge: {
     alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     backgroundColor: COLORS.terracottaSoft,
     borderColor: COLORS.terracotta,
     borderWidth: 1,
     borderRadius: RADII.pill,
-    paddingHorizontal: 14,
-    paddingVertical: 5,
+    paddingLeft: 6,
+    paddingRight: 14,
+    paddingVertical: 4,
     marginBottom: 10,
+  },
+  brandLogo: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
   },
   genZBadgeText: {
     fontSize: 10,

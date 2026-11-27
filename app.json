@@ -7,6 +7,7 @@
     "scheme": "duasaku",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
     "plugins": [
       "./plugins/withCleartextTraffic.js",
       "./plugins/withAppShortcuts.js",
