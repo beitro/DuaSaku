@@ -98,6 +98,95 @@ export function getApiUrl(): string {
 
 export const API_URL = getApiUrl();
 
+// Shared backend API client (auth + sideloaded data + analytics)
+export const sharedApi = {
+  sendOtp: (email: string, purpose: 'register' | 'reset_password') =>
+    fetch(`${SHARED_API_URL}/api/auth/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, purpose }),
+    }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Gagal mengirim OTP');
+      return data as { message: string; devOtp?: string };
+    }),
+
+  register: (payload: { email: string; password: string; name: string; otpCode: string }) =>
+    fetch(`${SHARED_API_URL}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, appSlug: 'duasaku' }),
+    }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Gagal mendaftar');
+      return data as { token: string; user: { id: string; email: string; name: string } };
+    }),
+
+  login: (email: string, password: string) =>
+    fetch(`${SHARED_API_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, appSlug: 'duasaku' }),
+    }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Gagal masuk');
+      return data as { token: string; user: { id: string; email: string; name: string } };
+    }),
+
+  resetPassword: (payload: { email: string; otpCode: string; newPassword: string }) =>
+    fetch(`${SHARED_API_URL}/api/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Gagal reset password');
+      return data as { message: string };
+    }),
+
+  getData: (token: string, collection: string, key: string) =>
+    fetch(`${SHARED_API_URL}/api/apps/duasaku/data/${collection}/${key}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(async (r) => {
+      if (!r.ok) return null;
+      return r.json() as Promise<{ value: any; updated_at: string }>;
+    }),
+
+  setData: (token: string, collection: string, key: string, value: any) =>
+    fetch(`${SHARED_API_URL}/api/apps/duasaku/data/${collection}/${key}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ value }),
+    }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Gagal simpan data');
+      return data;
+    }),
+
+  sendAnalytics: (token: string, eventName: string, properties?: any) =>
+    fetch(`${SHARED_API_URL}/api/analytics/event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ appSlug: 'duasaku', eventName, properties }),
+    }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Gagal kirim analytics');
+      return data;
+    }),
+};
+
+export function getSharedApiUrl(): string {
+  const rawEnv = (process.env.EXPO_PUBLIC_SHARED_API_URL || '').trim().replace(/\/+$/, '');
+  if (rawEnv) return rawEnv;
+  const extra = Constants.expoConfig?.extra as { sharedApiUrl?: unknown } | undefined;
+  const configUrl =
+    typeof extra?.sharedApiUrl === 'string' ? extra.sharedApiUrl.trim().replace(/\/+$/, '') : '';
+  if (configUrl) return configUrl;
+  return 'https://shared-backend-two.vercel.app';
+}
+
+export const SHARED_API_URL = getSharedApiUrl();
+
 export class ApiError extends Error {
   status: number;
 

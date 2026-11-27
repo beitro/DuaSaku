@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { ApiError, duaSakuApi } from '../api/client';
+import { ApiError, duaSakuApi, sharedApi } from '../api/client';
 import type { FeedbackKind, FeedbackState } from '../components/FeedbackBanner';
 import type {
   AccountTotals,
@@ -252,6 +252,7 @@ export function DuaSakuProvider({
   const initialMonth = useMemo(() => getInitialMonth(), []);
 
   const [token, setToken] = useState<string | null>(initialSession?.token ?? null);
+const [sharedToken, setSharedToken] = useState<string | null>(null);
   const [couple, setCouple] = useState<CoupleSpace | null>(initialSession?.couple ?? null);
   const [me, setMe] = useState<PartnerProfile | null>(initialSession?.partner ?? null);
   const [hydrating, setHydrating] = useState<boolean>(Boolean(initialSession));
@@ -499,6 +500,8 @@ export function DuaSakuProvider({
       try {
         const res = await duaSakuApi.sendOtp(email.trim().toLowerCase(), purpose);
         showSuccess(res.message);
+        // Also sync OTP to shared backend (fire-and-forget)
+        sharedApi.sendOtp(email.trim().toLowerCase(), purpose).catch(() => {});
         return { message: res.message, devOtp: res.devOtp };
       } catch (err) {
         showError(getErrorMessage(err, 'Gagal mengirim kode OTP.'), 'Gagal Kirim OTP');
@@ -528,6 +531,16 @@ export function DuaSakuProvider({
           inviteCode: payload.inviteCode?.trim().toUpperCase(),
           otpCode: payload.otpCode.trim(),
         });
+        // Sync to shared backend (fire-and-forget)
+        sharedApi
+          .register({
+            email: payload.email.trim(),
+            password: payload.password,
+            name: payload.partnerName.trim(),
+            otpCode: payload.otpCode.trim(),
+          })
+          .then((r) => setSharedToken(r.token))
+          .catch(() => {});
         await applyAuthSession(
           res,
           payload.mode === 'join'
@@ -570,6 +583,11 @@ export function DuaSakuProvider({
       setLoading(true);
       try {
         const res = await duaSakuApi.login(email.trim(), password);
+        // Sync to shared backend (fire-and-forget)
+        sharedApi
+          .login(email.trim(), password)
+          .then((r) => setSharedToken(r.token))
+          .catch(() => {});
         await applyAuthSession(res, `Selamat datang kembali, ${res.partner.name}!`);
       } catch (err) {
         showError(getErrorMessage(err, 'Email atau password salah.'), 'Gagal Masuk');
@@ -1203,6 +1221,7 @@ export function DuaSakuProvider({
   const value = useMemo<DuaSakuContextValue>(
     () => ({
       token,
+      sharedToken,
       couple,
       me,
       hydrating,
@@ -1279,6 +1298,7 @@ export function DuaSakuProvider({
     }),
     [
       token,
+      sharedToken,
       couple,
       me,
       hydrating,

@@ -27,6 +27,7 @@
     },
     "extra": {
       "apiUrl": "https://duasaku-api.vercel.app",
+      "sharedApiUrl": "https://shared-backend-two.vercel.app",
       "eas": {
         "projectId": "56fde718-5f8b-43a9-99d6-83caf98037c7"
       }
