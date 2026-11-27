@@ -1097,6 +1097,7 @@ async function sendOtpEmail(email, code, purpose) {
     </div>
   `;
 
+  const showInApp = process.env.NODE_ENV !== 'production' || process.env.SHOW_DEV_OTP === 'true';
   if (process.env.RESEND_API_KEY) {
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -1114,15 +1115,20 @@ async function sendOtpEmail(email, code, purpose) {
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => '');
       console.error(`[OTP EMAIL ERROR] ${resp.status} ${errBody}`);
+      // Fall back to in-app OTP if email fails
+      if (showInApp) {
+        console.log(`[OTP IN-APP FALLBACK] ${purpose} ${email}: ${code}`);
+        return { sent: true, devOtp: code };
+      }
       throw new HttpError(502, 'Gagal mengirim email OTP. Silakan coba lagi.');
     }
-    return { sent: true };
+    return { sent: true, devOtp: showInApp ? code : undefined };
   }
 
   console.log(`[OTP DEV] ${purpose} ${email}: ${code}`);
   return {
     sent: true,
-    devOtp: process.env.NODE_ENV !== 'production' ? code : undefined,
+    devOtp: showInApp ? code : undefined,
   };
 }
 

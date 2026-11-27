@@ -518,17 +518,17 @@ export function OnboardingScreen(): React.JSX.Element {
                     variant="secondary"
                     size="sm"
                     onPress={() => handleSendOtp('register')}
-                    disabled={true}
+                    disabled={otpSending || loading}
                     testID="register-send-otp-btn"
                   >
-                    Kirim Kode OTP (segera)
+                    {otpSending ? 'Mengirim...' : 'Kirim Kode OTP'}
                   </PressableButton>
                 </View>
 
                 {!!devOtpHint && (
                   <View style={styles.devOtpNotice} testID="register-dev-otp-notice">
                     <Text style={styles.devOtpNoticeText}>
-                      Mode lokal: gunakan kode OTP <Text style={styles.devOtpCode}>{devOtpHint}</Text>
+                      Kode OTP kamu: <Text style={styles.devOtpCode}>{devOtpHint}</Text>
                     </Text>
                   </View>
                 )}
@@ -789,17 +789,17 @@ export function OnboardingScreen(): React.JSX.Element {
                     variant="secondary"
                     size="sm"
                     onPress={() => handleSendOtp('reset_password')}
-                    disabled={true}
+                    disabled={otpSending || loading}
                     testID="forgot-send-otp-btn"
                   >
-                    Kirim Kode OTP (segera)
+                    {otpSending ? 'Mengirim...' : 'Kirim Kode OTP'}
                   </PressableButton>
                 </View>
 
                 {!!devOtpHint && (
                   <View style={styles.devOtpNotice} testID="forgot-dev-otp-notice">
                     <Text style={styles.devOtpNoticeText}>
-                      Mode lokal: gunakan kode OTP <Text style={styles.devOtpCode}>{devOtpHint}</Text>
+                      Kode OTP kamu: <Text style={styles.devOtpCode}>{devOtpHint}</Text>
                     </Text>
                   </View>
                 )}
