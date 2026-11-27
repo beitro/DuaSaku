@@ -34,9 +34,8 @@ import type { TabKey } from './src/types';
 const PRIMARY_TABS: ReadonlyArray<{ key: TabKey; label: string; icon: string }> = [
   { key: 'dashboard', label: 'Ringkas', icon: '🏠' },
   { key: 'transactions', label: 'Transaksi', icon: '🧾' },
-  { key: 'analytics', label: 'Analitik', icon: '📊' },
-  { key: 'accounts', label: 'Dompet', icon: '👛' },
   { key: 'budgets', label: 'Anggaran', icon: '🎯' },
+  { key: 'settings', label: 'Pengaturan', icon: '⚙️' },
 ];
 
 const MONTHLY_TABS = new Set<TabKey>([
@@ -243,46 +242,8 @@ function AppContent(): React.JSX.Element {
           </View>
         </View>
 
-        {/* Secondary Utility Bar: Pos & Target + Catatan */}
+        {/* Secondary Utility Bar */}
         <View style={styles.utilityRow}>
-          <TouchableOpacity
-            style={[
-              styles.utilityPill,
-              activeTab === 'categories' && styles.utilityPillActive,
-            ]}
-            onPress={() => setActiveTab('categories')}
-            accessibilityRole="button"
-            testID="nav-pill-categories"
-          >
-            <Text
-              style={[
-                styles.utilityPillText,
-                activeTab === 'categories' && styles.utilityPillTextActive,
-              ]}
-            >
-              🗂️ Pos & Target
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.utilityPill,
-              activeTab === 'notes' && styles.utilityPillActive,
-            ]}
-            onPress={() => setActiveTab('notes')}
-            accessibilityRole="button"
-            testID="nav-pill-notes"
-          >
-            <Text
-              style={[
-                styles.utilityPillText,
-                activeTab === 'notes' && styles.utilityPillTextActive,
-              ]}
-            >
-              📝 Catatan
-            </Text>
-          </TouchableOpacity>
-
           <TouchableOpacity
             style={[
               styles.utilityPill,
