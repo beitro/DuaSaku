@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { AppFrame } from '../components/AppFrame';
@@ -448,63 +449,53 @@ export function OnboardingScreen(): React.JSX.Element {
 
               <View style={styles.card}>
                 <View style={styles.optionRow}>
-                  <PressableButton
-                    variant="ghost"
-                    size="md"
+                  <TouchableOpacity
                     style={[
                       styles.optionCard,
                       spaceMode === 'create' && styles.optionCardActive,
-                    ].flat() as any}
+                    ]}
                     onPress={() => {
                       setSpaceMode('create');
                       setLocalError(null);
                     }}
                     testID="setup-mode-create"
-                    children={
-                      <>
-                        <Text
-                          style={[
-                            styles.optionTitle,
-                            spaceMode === 'create' && styles.optionTitleActive,
-                          ].flat() as any}
-                        >
-                          Buat Ruang Baru
-                        </Text>
-                        <Text style={styles.optionDesc}>
-                          Dapatkan kode undangan untuk pasangan.
-                        </Text>
-                      </>
-                    }
-                  />
+                  >
+                    <Text
+                      style={[
+                        styles.optionTitle,
+                        spaceMode === 'create' && styles.optionTitleActive,
+                      ]}
+                    >
+                      Buat Ruang Baru
+                    </Text>
+                    <Text style={styles.optionDesc}>
+                      Dapatkan kode undangan untuk pasangan.
+                    </Text>
+                  </TouchableOpacity>
 
-                  <PressableButton
-                    variant="ghost"
-                    size="md"
+                  <TouchableOpacity
                     style={[
                       styles.optionCard,
                       spaceMode === 'join' && styles.optionCardActive,
-                    ].flat() as any}
+                    ]}
                     onPress={() => {
                       setSpaceMode('join');
                       setLocalError(null);
                     }}
                     testID="setup-mode-join"
-                    children={
-                      <>
-                        <Text
-                          style={[
-                            styles.optionTitle,
-                            spaceMode === 'join' && styles.optionTitleActive,
-                          ].flat() as any}
-                        >
-                          Gabung Pasangan
-                        </Text>
-                        <Text style={styles.optionDesc}>
-                          Punya kode 6 karakter? Gabung di sini.
-                        </Text>
-                      </>
-                    }
-                  />
+                  >
+                    <Text
+                      style={[
+                        styles.optionTitle,
+                        spaceMode === 'join' && styles.optionTitleActive,
+                      ]}
+                    >
+                      Gabung Pasangan
+                    </Text>
+                    <Text style={styles.optionDesc}>
+                      Punya kode 6 karakter? Gabung di sini.
+                    </Text>
+                  </TouchableOpacity>
                 </View>
 
                 {spaceMode === 'create' ? (
