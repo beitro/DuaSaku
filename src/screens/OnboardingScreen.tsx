@@ -1256,9 +1256,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   brandLogo: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
   },
   genZBadgeText: {
     fontSize: 10,
