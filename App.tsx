@@ -230,7 +230,7 @@ function AppContent(): React.JSX.Element {
               accessibilityRole="button"
               testID="header-add-tx-btn"
             >
-              <Text style={styles.addTxBtnText}>+ Catat</Text>
+              <Text style={styles.addTxBtnText}>➕ Catat</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.logoutBtn}
@@ -238,7 +238,7 @@ function AppContent(): React.JSX.Element {
               accessibilityRole="button"
               testID="header-logout-btn"
             >
-              <Text style={styles.logoutBtnText}>Keluar</Text>
+              <Text style={styles.logoutBtnText}>🚪 Keluar</Text>
             </TouchableOpacity>
           </View>
         </View>
