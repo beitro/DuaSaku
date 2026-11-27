@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -11,8 +12,9 @@ import {
   View,
 } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
+import { useReduceMotion } from '../hooks/useReduceMotion';
 import { PressableButton } from './PressableButton';
-import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
+import { COLORS, MOTION, RADII, SHADOWS, SPACING } from '../theme/tokens';
 
 export interface ModalFormProps {
   visible: boolean;
@@ -46,21 +48,105 @@ export function ModalForm({
   cancelTestID,
 }: ModalFormProps): React.JSX.Element | null {
   const { height } = useWindowDimensions();
+  const reduceMotion = useReduceMotion();
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const cardScale = useRef(new Animated.Value(0.95)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+  const closingRef = useRef(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    closingRef.current = false;
+    backdropOpacity.stopAnimation();
+    cardScale.stopAnimation();
+    cardOpacity.stopAnimation();
+
+    backdropOpacity.setValue(0);
+    cardOpacity.setValue(0);
+    cardScale.setValue(reduceMotion ? 1 : 0.95);
+
+    const animations: Animated.CompositeAnimation[] = [
+      Animated.timing(backdropOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      reduceMotion
+        ? Animated.timing(cardOpacity, {
+            toValue: 1,
+            ...MOTION.easing.timingReduced,
+          })
+        : Animated.spring(cardOpacity, {
+            toValue: 1,
+            ...MOTION.easing.springFluid,
+          }),
+    ];
+
+    if (!reduceMotion) {
+      animations.push(
+        Animated.spring(cardScale, {
+          toValue: 1,
+          ...MOTION.easing.springFluid,
+        })
+      );
+    }
+
+    Animated.parallel(animations).start();
+  }, [visible, reduceMotion, backdropOpacity, cardScale, cardOpacity]);
+
   if (!visible) return null;
 
   const handleClose = () => {
-    if (!submitting) onClose();
+    if (submitting || closingRef.current) return;
+    closingRef.current = true;
+    backdropOpacity.stopAnimation();
+    cardScale.stopAnimation();
+    cardOpacity.stopAnimation();
+
+    const animations: Animated.CompositeAnimation[] = [
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+      Animated.timing(cardOpacity, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+    ];
+
+    if (!reduceMotion) {
+      animations.push(
+        Animated.timing(cardScale, {
+          toValue: 0.95,
+          duration: 120,
+          useNativeDriver: true,
+        })
+      );
+    }
+
+    Animated.parallel(animations).start(() => {
+      closingRef.current = false;
+      onClose();
+    });
   };
 
   return (
     <Modal
       visible={visible}
       transparent
-      animationType={Platform.OS === 'web' ? 'none' : 'slide'}
+      animationType="none"
       onRequestClose={handleClose}
       testID={testID}
     >
-      <View style={[styles.backdrop, Platform.OS === 'web' ? { minHeight: height } : undefined]}>
+      <Animated.View
+        style={[
+          styles.backdrop,
+          Platform.OS === 'web' ? { minHeight: height } : undefined,
+          { opacity: backdropOpacity },
+        ]}
+      >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardAvoiding}
@@ -70,7 +156,16 @@ export function ModalForm({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <View style={[styles.modalCard, cardStyle]}>
+            <Animated.View
+              style={[
+                styles.modalCard,
+                cardStyle,
+                {
+                  opacity: cardOpacity,
+                  transform: [{ scale: cardScale }],
+                },
+              ]}
+            >
               <View style={styles.header}>
                 <Text style={styles.title}>{title}</Text>
                 {showCloseButton && (
@@ -116,10 +211,10 @@ export function ModalForm({
                   )}
                 </PressableButton>
               </View>
-            </View>
+            </Animated.View>
           </ScrollView>
         </KeyboardAvoidingView>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

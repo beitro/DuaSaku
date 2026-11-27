@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Modal,
+  PanResponder,
   Platform,
   ScrollView,
   StyleSheet,
@@ -12,7 +14,8 @@ import {
   View,
 } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
-import { COLORS, QUICK_AMOUNT_PRESETS, RADII, SHADOWS, SPACING } from '../theme/tokens';
+import { useReduceMotion } from '../hooks/useReduceMotion';
+import { COLORS, MOTION, QUICK_AMOUNT_PRESETS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import type { QuickPreset, TransactionType } from '../types';
 import {
   formatRp,
@@ -24,7 +27,6 @@ import {
 import { parseReceiptLocally } from '../utils/receiptParser';
 import { CalculatorKeypad } from './CalculatorKeypad';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { Animated } from 'react-native';
 
 export function QuickEntrySheet(): React.JSX.Element | null {
   const {
@@ -62,6 +64,132 @@ export function QuickEntrySheet(): React.JSX.Element | null {
   const cameraRef = useRef<any>(null);
   const prevOpenRef = useRef(false);
   const prevQuickEntryRef = useRef(quickEntry);
+  const reduceMotion = useReduceMotion();
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+  const sheetTranslateY = useRef(new Animated.Value(320)).current;
+  const sheetOpacity = useRef(new Animated.Value(0)).current;
+  const closingRef = useRef(false);
+  const submittingRef = useRef(submitting);
+  submittingRef.current = submitting;
+  const closeQuickEntryRef = useRef(closeQuickEntry);
+  closeQuickEntryRef.current = closeQuickEntry;
+
+  useEffect(() => {
+    if (!quickEntryOpen) return;
+    closingRef.current = false;
+    backdropOpacity.stopAnimation();
+    sheetTranslateY.stopAnimation();
+    sheetOpacity.stopAnimation();
+
+    backdropOpacity.setValue(0);
+    sheetOpacity.setValue(0);
+    sheetTranslateY.setValue(reduceMotion ? 0 : 320);
+
+    const animations: Animated.CompositeAnimation[] = [
+      Animated.timing(backdropOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      reduceMotion
+        ? Animated.timing(sheetOpacity, {
+            toValue: 1,
+            ...MOTION.easing.timingReduced,
+          })
+        : Animated.spring(sheetOpacity, {
+            toValue: 1,
+            ...MOTION.easing.springSheet,
+          }),
+    ];
+
+    if (!reduceMotion) {
+      animations.push(
+        Animated.spring(sheetTranslateY, {
+          toValue: 0,
+          ...MOTION.easing.springSheet,
+        })
+      );
+    }
+
+    Animated.parallel(animations).start();
+  }, [quickEntryOpen, reduceMotion, backdropOpacity, sheetTranslateY, sheetOpacity]);
+
+  const dismissSheet = (vy = 0) => {
+    if (submittingRef.current || closingRef.current) return;
+    closingRef.current = true;
+    backdropOpacity.stopAnimation();
+    sheetTranslateY.stopAnimation();
+    sheetOpacity.stopAnimation();
+
+    const animations: Animated.CompositeAnimation[] = [
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: 140,
+        useNativeDriver: true,
+      }),
+      Animated.timing(sheetOpacity, {
+        toValue: 0,
+        duration: 140,
+        useNativeDriver: true,
+      }),
+    ];
+
+    if (!reduceMotion) {
+      animations.push(
+        vy > 0
+          ? Animated.spring(sheetTranslateY, {
+              toValue: 320,
+              velocity: Math.min(3000, Math.max(0, vy * 1000)),
+              ...MOTION.easing.springSheet,
+            })
+          : Animated.timing(sheetTranslateY, {
+              toValue: 320,
+              duration: 140,
+              useNativeDriver: true,
+            })
+      );
+    }
+
+    Animated.parallel(animations).start(() => {
+      closingRef.current = false;
+      closeQuickEntryRef.current();
+    });
+  };
+
+  const dismissSheetRef = useRef(dismissSheet);
+  dismissSheetRef.current = dismissSheet;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        !submittingRef.current &&
+        Math.abs(gestureState.dy) > 4 &&
+        Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+      onPanResponderMove: (_, gestureState) => {
+        const { dy } = gestureState;
+        sheetTranslateY.setValue(dy >= 0 ? dy : dy * 0.25);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const { dy, vy } = gestureState;
+        const projectedY = dy + vy * 99;
+        if (projectedY > 120 || vy > 0.5) {
+          dismissSheetRef.current(vy);
+        } else {
+          Animated.spring(sheetTranslateY, {
+            toValue: 0,
+            ...MOTION.easing.springSheet,
+          }).start();
+        }
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(sheetTranslateY, {
+          toValue: 0,
+          ...MOTION.easing.springSheet,
+        }).start();
+      },
+    })
+  ).current;
 
   useEffect(() => {
     const justOpened = !prevOpenRef.current && quickEntryOpen;
@@ -219,24 +347,38 @@ export function QuickEntrySheet(): React.JSX.Element | null {
     <Modal
       visible={quickEntryOpen}
       transparent
-      animationType={Platform.OS === 'web' ? 'none' : 'slide'}
-      onRequestClose={closeQuickEntry}
+      animationType="none"
+      onRequestClose={() => dismissSheet(0)}
       testID="quick-entry-modal"
     >
-      <View
+      <Animated.View
         style={[
           styles.backdrop,
           Platform.OS === 'web' ? { minHeight: height } : undefined,
+          { opacity: backdropOpacity },
         ]}
       >
-        <View style={styles.card}>
-          <View style={styles.headerRow}>
-            <Text style={styles.title}>
-              {quickEntry.mode === 'edit' ? 'Edit Transaksi' : 'Catat Transaksi Cepat'}
-            </Text>
-            <TouchableOpacity onPress={closeQuickEntry} testID="quick-entry-close-btn">
-              <Text style={styles.closeX}>✕</Text>
-            </TouchableOpacity>
+        <Animated.View
+          style={[
+            styles.card,
+            {
+              opacity: sheetOpacity,
+              transform: [{ translateY: sheetTranslateY }],
+            },
+          ]}
+        >
+          <View {...panResponder.panHandlers}>
+            <View style={styles.grabberContainer}>
+              <View style={styles.grabber} />
+            </View>
+            <View style={styles.headerRow}>
+              <Text style={styles.title}>
+                {quickEntry.mode === 'edit' ? 'Edit Transaksi' : 'Catat Transaksi Cepat'}
+              </Text>
+              <TouchableOpacity onPress={() => dismissSheet(0)} testID="quick-entry-close-btn">
+                <Text style={styles.closeX}>✕</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: height * 0.72 }}>
@@ -492,7 +634,7 @@ export function QuickEntrySheet(): React.JSX.Element | null {
             )}
             <TouchableOpacity
               style={styles.cancelBtn}
-              onPress={closeQuickEntry}
+              onPress={() => dismissSheet(0)}
               disabled={submitting}
               testID="quick-entry-cancel-btn"
             >
@@ -511,8 +653,8 @@ export function QuickEntrySheet(): React.JSX.Element | null {
               )}
             </TouchableOpacity>
           </View>
-        </View>
-      </View>
+        </Animated.View>
+      </Animated.View>
     </Modal>
     {showCamera && (
       <Modal visible transparent animationType="slide">
@@ -568,6 +710,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     ...SHADOWS.elevated,
+  },
+  grabberContainer: {
+    alignItems: 'center',
+    paddingBottom: SPACING.sm,
+  },
+  grabber: {
+    width: 36,
+    height: 4,
+    borderRadius: RADII.pill,
+    backgroundColor: COLORS.borderStrong,
   },
   headerRow: {
     flexDirection: 'row',

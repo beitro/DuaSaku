@@ -28,7 +28,8 @@ import { NotesScreen } from './src/screens/NotesScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { TransactionsScreen } from './src/screens/TransactionsScreen';
-import { COLORS, RADII, SPACING } from './src/theme/tokens';
+import { useReduceMotion } from './src/hooks/useReduceMotion';
+import { COLORS, MOTION, RADII, SPACING } from './src/theme/tokens';
 import type { TabKey } from './src/types';
 
 const PRIMARY_TABS: ReadonlyArray<{ key: TabKey; label: string; icon: string }> = [
@@ -68,11 +69,38 @@ function AppContent(): React.JSX.Element {
     logout,
   } = useDuaSaku();
   const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const reduceMotion = useReduceMotion();
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const translateYAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    fadeAnim.setValue(0);
-    Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-  }, [activeTab, fadeAnim]);
+    fadeAnim.stopAnimation();
+    translateYAnim.stopAnimation();
+
+    if (reduceMotion) {
+      fadeAnim.setValue(0.85);
+      translateYAnim.setValue(0);
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 120,
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+
+    fadeAnim.setValue(0.75);
+    translateYAnim.setValue(6);
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.spring(translateYAnim, {
+        toValue: 0,
+        ...MOTION.easing.springFluid,
+      }),
+    ]).start();
+  }, [activeTab, reduceMotion, fadeAnim, translateYAnim]);
   const [tabHistory, setTabHistory] = useState<TabKey[]>([]);
 
   useEffect(() => {
@@ -197,7 +225,6 @@ function AppContent(): React.JSX.Element {
   return (
     <AppFrame>
       <StatusBar style="dark" />
-      <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
           <View style={styles.headerLeft}>
@@ -271,24 +298,31 @@ function AppContent(): React.JSX.Element {
         contentContainerStyle={styles.bodyContent}
         keyboardShouldPersistTaps="handled"
       >
-        {MONTHLY_TABS.has(activeTab) && (
-          <MonthSelector
-            month={selectedMonth}
-            onChangeMonth={setSelectedMonth}
-            disabled={loading}
-          />
-        )}
+        <Animated.View
+          style={{
+            opacity: fadeAnim,
+            transform: [{ translateY: translateYAnim }],
+          }}
+        >
+          {MONTHLY_TABS.has(activeTab) && (
+            <MonthSelector
+              month={selectedMonth}
+              onChangeMonth={setSelectedMonth}
+              disabled={loading}
+            />
+          )}
 
-        <FeedbackBanner feedback={feedback} onDismiss={clearFeedback} />
+          <FeedbackBanner feedback={feedback} onDismiss={clearFeedback} />
 
-        {activeTab === 'dashboard' && <DashboardScreen />}
-        {activeTab === 'transactions' && <TransactionsScreen />}
-        {activeTab === 'analytics' && <AnalyticsScreen />}
-        {activeTab === 'accounts' && <AccountsScreen />}
-        {activeTab === 'budgets' && <BudgetsScreen />}
-        {activeTab === 'categories' && <CategoriesScreen />}
-        {activeTab === 'notes' && <NotesScreen />}
-        {activeTab === 'settings' && <SettingsScreen />}
+          {activeTab === 'dashboard' && <DashboardScreen />}
+          {activeTab === 'transactions' && <TransactionsScreen />}
+          {activeTab === 'analytics' && <AnalyticsScreen />}
+          {activeTab === 'accounts' && <AccountsScreen />}
+          {activeTab === 'budgets' && <BudgetsScreen />}
+          {activeTab === 'categories' && <CategoriesScreen />}
+          {activeTab === 'notes' && <NotesScreen />}
+          {activeTab === 'settings' && <SettingsScreen />}
+        </Animated.View>
       </ScrollView>
 
       {/* 5-Tab Bottom Bar */}
@@ -333,7 +367,6 @@ function AppContent(): React.JSX.Element {
         onConfirm={executeConfirm}
         onCancel={closeConfirm}
       />
-      </Animated.View>
     </AppFrame>
   );
 }

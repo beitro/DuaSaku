@@ -1,7 +1,10 @@
-import React from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import React, { useRef } from 'react';
+import { Animated, Pressable, StyleSheet, Text } from 'react-native';
 import type { TextStyle, ViewStyle } from 'react-native';
-import { COLORS } from '../theme/tokens';
+import { useReduceMotion } from '../hooks/useReduceMotion';
+import { COLORS, MOTION } from '../theme/tokens';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 type Size = 'sm' | 'md' | 'lg';
@@ -71,11 +74,68 @@ export const PressableButton = React.forwardRef<React.ComponentRef<typeof Pressa
   ref
 ) {
   const padding = SIZE_PADDING[size];
+  const reduceMotion = useReduceMotion();
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const opacityAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    if (disabled || disableFeedback) return;
+    scaleAnim.stopAnimation();
+    opacityAnim.stopAnimation();
+
+    const animations: Animated.CompositeAnimation[] = [
+      Animated.timing(opacityAnim, {
+        toValue: 0.88,
+        duration: 80,
+        useNativeDriver: true,
+      }),
+    ];
+
+    if (!reduceMotion) {
+      animations.push(
+        Animated.spring(scaleAnim, {
+          toValue: 0.97,
+          ...MOTION.easing.springPress,
+        })
+      );
+    }
+
+    Animated.parallel(animations).start();
+  };
+
+  const handlePressOut = () => {
+    if (disabled || disableFeedback) return;
+    scaleAnim.stopAnimation();
+    opacityAnim.stopAnimation();
+
+    const animations: Animated.CompositeAnimation[] = [
+      Animated.timing(opacityAnim, {
+        toValue: 1,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+    ];
+
+    if (!reduceMotion) {
+      animations.push(
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          ...MOTION.easing.springPress,
+        })
+      );
+    } else {
+      scaleAnim.setValue(1);
+    }
+
+    Animated.parallel(animations).start();
+  };
 
   return (
-    <Pressable
-      ref={ref}
+    <AnimatedPressable
+      ref={ref as React.Ref<React.ComponentRef<typeof AnimatedPressable>>}
       onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
@@ -83,7 +143,7 @@ export const PressableButton = React.forwardRef<React.ComponentRef<typeof Pressa
       accessibilityState={{ disabled }}
       testID={testID}
       android_ripple={disableFeedback ? undefined : { color: COLORS.terracottaSoft }}
-      style={({ pressed }) => [
+      style={[
         styles.base,
         VARIANT_STYLES[variant],
         {
@@ -91,7 +151,10 @@ export const PressableButton = React.forwardRef<React.ComponentRef<typeof Pressa
           paddingVertical: padding.v,
           borderRadius: SIZE_RADIUS[size],
         },
-        !disableFeedback && pressed && styles.pressed,
+        !disableFeedback && {
+          transform: [{ scale: scaleAnim }],
+          opacity: opacityAnim,
+        },
         disabled && styles.disabled,
         style,
       ]}
@@ -108,7 +171,7 @@ export const PressableButton = React.forwardRef<React.ComponentRef<typeof Pressa
       ) : (
         children
       )}
-    </Pressable>
+    </AnimatedPressable>
   );
 });
 

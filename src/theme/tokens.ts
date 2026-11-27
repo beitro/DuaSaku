@@ -107,6 +107,10 @@ export const MOTION = {
     standard: 'cubic-bezier(0.4, 0, 0.2, 1)',
     spring: { damping: 15, stiffness: 150, mass: 1 },
     springSnappy: { damping: 12, stiffness: 180, mass: 1 },
+    springFluid: { stiffness: 300, damping: 35, mass: 1, useNativeDriver: true },
+    springPress: { stiffness: 500, damping: 45, mass: 1, useNativeDriver: true },
+    springSheet: { stiffness: 320, damping: 30, mass: 1, useNativeDriver: true },
+    timingReduced: { duration: 160, useNativeDriver: true },
   },
 } as const;
 
