@@ -142,6 +142,10 @@ export interface DuaSakuContextValue {
   closeQuickEntry: () => void;
 
   // API Actions
+  sendAuthOtp: (
+    email: string,
+    purpose: 'register' | 'reset_password'
+  ) => Promise<{ message: string; devOtp?: string }>;
   registerAccount: (payload: {
     email: string;
     password: string;
@@ -149,7 +153,13 @@ export interface DuaSakuContextValue {
     mode: 'create' | 'join';
     coupleName?: string;
     inviteCode?: string;
+    otpCode: string;
   }) => Promise<void>;
+  resetAccountPassword: (payload: {
+    email: string;
+    otpCode: string;
+    newPassword: string;
+  }) => Promise<string>;
   loginAccount: (email: string, password: string) => Promise<void>;
   createCouple: (coupleName: string, partnerName: string) => Promise<void>;
   joinCouple: (inviteCode: string, partnerName: string) => Promise<void>;
@@ -484,6 +494,20 @@ export function DuaSakuProvider({
     [selectedMonth, showSuccess, syncAll]
   );
 
+  const sendAuthOtp = useCallback(
+    async (email: string, purpose: 'register' | 'reset_password') => {
+      try {
+        const res = await duaSakuApi.sendOtp(email.trim().toLowerCase(), purpose);
+        showSuccess(res.message);
+        return { message: res.message, devOtp: res.devOtp };
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal mengirim kode OTP.'), 'Gagal Kirim OTP');
+        throw err;
+      }
+    },
+    [showError, showSuccess]
+  );
+
   const registerAccount = useCallback(
     async (payload: {
       email: string;
@@ -492,6 +516,7 @@ export function DuaSakuProvider({
       mode: 'create' | 'join';
       coupleName?: string;
       inviteCode?: string;
+      otpCode: string;
     }) => {
       setLoading(true);
       try {
@@ -501,6 +526,7 @@ export function DuaSakuProvider({
           partnerName: payload.partnerName.trim(),
           coupleName: payload.coupleName?.trim(),
           inviteCode: payload.inviteCode?.trim().toUpperCase(),
+          otpCode: payload.otpCode.trim(),
         });
         await applyAuthSession(
           res,
@@ -516,6 +542,27 @@ export function DuaSakuProvider({
       }
     },
     [applyAuthSession, showError]
+  );
+
+  const resetAccountPassword = useCallback(
+    async (payload: { email: string; otpCode: string; newPassword: string }) => {
+      setLoading(true);
+      try {
+        const res = await duaSakuApi.resetPassword({
+          email: payload.email.trim().toLowerCase(),
+          otpCode: payload.otpCode.trim(),
+          newPassword: payload.newPassword,
+        });
+        showSuccess(res.message);
+        return res.message;
+      } catch (err) {
+        showError(getErrorMessage(err, 'Gagal memperbarui password.'), 'Gagal Reset Password');
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [showError, showSuccess]
   );
 
   const loginAccount = useCallback(
@@ -1192,7 +1239,9 @@ export function DuaSakuProvider({
       openNewTransaction,
       openEditTransaction,
       closeQuickEntry,
+      sendAuthOtp,
       registerAccount,
+      resetAccountPassword,
       loginAccount,
       createCouple,
       joinCouple,
@@ -1264,7 +1313,9 @@ export function DuaSakuProvider({
       openNewTransaction,
       openEditTransaction,
       closeQuickEntry,
+      sendAuthOtp,
       registerAccount,
+      resetAccountPassword,
       loginAccount,
       createCouple,
       joinCouple,

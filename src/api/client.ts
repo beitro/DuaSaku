@@ -169,6 +169,12 @@ async function request<T>(
 export const duaSakuApi = {
   getHealth: () => request<HealthResponse>('/api/health'),
 
+  sendOtp: (email: string, purpose: 'register' | 'reset_password') =>
+    request<{ ok: boolean; message: string; devOtp?: string }>('/api/auth/send-otp', {
+      method: 'POST',
+      body: { email, purpose },
+    }),
+
   register: (payload: {
     email: string;
     password: string;
@@ -176,8 +182,15 @@ export const duaSakuApi = {
     mode: 'create' | 'join';
     coupleName?: string;
     inviteCode?: string;
+    otpCode: string;
   }) =>
     request<AuthResponse>('/api/auth/register', {
+      method: 'POST',
+      body: payload,
+    }),
+
+  resetPassword: (payload: { email: string; otpCode: string; newPassword: string }) =>
+    request<{ ok: boolean; message: string }>('/api/auth/reset-password', {
       method: 'POST',
       body: payload,
     }),

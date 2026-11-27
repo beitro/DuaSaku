@@ -18,14 +18,16 @@ import { PressableButton } from '../components/PressableButton';
 import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 
-type FlowStep = 'welcome' | 'login' | 'register_account' | 'setup_space';
+type FlowStep = 'welcome' | 'login' | 'register_account' | 'setup_space' | 'forgot_password';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function OnboardingScreen(): React.JSX.Element {
   const {
+    sendAuthOtp,
     loginAccount,
     registerAccount,
+    resetAccountPassword,
     loading,
     feedback,
     clearFeedback,
@@ -37,6 +39,10 @@ export function OnboardingScreen(): React.JSX.Element {
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [otpInput, setOtpInput] = useState('');
+  const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
+  const [otpSending, setOtpSending] = useState(false);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
   const [coupleNameInput, setCoupleNameInput] = useState('Dompet Masa Depan');
   const [inviteCodeInput, setInviteCodeInput] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -45,6 +51,30 @@ export function OnboardingScreen(): React.JSX.Element {
     setStep(next);
     setLocalError(null);
     clearFeedback();
+    if (next === 'welcome' || next === 'login' || next === 'forgot_password') {
+      setOtpInput('');
+      setDevOtpHint(null);
+      setNewPasswordInput('');
+    }
+  };
+
+  const handleSendOtp = async (purpose: 'register' | 'reset_password') => {
+    setLocalError(null);
+    clearFeedback();
+    const cleanEmail = emailInput.trim().toLowerCase();
+    if (!EMAIL_RE.test(cleanEmail)) {
+      setLocalError('Format email belum pas. Cek lagi, ya.');
+      return;
+    }
+    setOtpSending(true);
+    try {
+      const res = await sendAuthOtp(cleanEmail, purpose);
+      setDevOtpHint(res.devOtp ?? null);
+    } catch {
+      // Error banner already handled by DuaSakuContext
+    } finally {
+      setOtpSending(false);
+    }
   };
 
   const handleLoginSubmit = async () => {
@@ -66,6 +96,39 @@ export function OnboardingScreen(): React.JSX.Element {
     }
   };
 
+  const handleResetPasswordSubmit = async () => {
+    setLocalError(null);
+    clearFeedback();
+    const cleanEmail = emailInput.trim().toLowerCase();
+    if (!EMAIL_RE.test(cleanEmail)) {
+      setLocalError('Format email belum pas. Cek lagi, ya.');
+      return;
+    }
+    const cleanOtp = otpInput.trim();
+    if (!/^\d{6}$/.test(cleanOtp)) {
+      setLocalError('Masukkan kode OTP 6 digit dari emailmu.');
+      return;
+    }
+    if (newPasswordInput.length < 6) {
+      setLocalError('Password baru minimal 6 karakter.');
+      return;
+    }
+    try {
+      await resetAccountPassword({
+        email: cleanEmail,
+        otpCode: cleanOtp,
+        newPassword: newPasswordInput,
+      });
+      setPasswordInput('');
+      setOtpInput('');
+      setDevOtpHint(null);
+      setNewPasswordInput('');
+      setStep('login');
+    } catch {
+      // Error banner already handled by DuaSakuContext
+    }
+  };
+
   const handleRegisterAccountNext = () => {
     setLocalError(null);
     clearFeedback();
@@ -76,6 +139,10 @@ export function OnboardingScreen(): React.JSX.Element {
     const cleanEmail = emailInput.trim().toLowerCase();
     if (!EMAIL_RE.test(cleanEmail)) {
       setLocalError('Format email belum pas. Cek lagi, ya.');
+      return;
+    }
+    if (!/^\d{6}$/.test(otpInput.trim())) {
+      setLocalError('Masukkan kode OTP 6 digit yang dikirim ke emailmu.');
       return;
     }
     if (passwordInput.length < 6) {
@@ -90,6 +157,7 @@ export function OnboardingScreen(): React.JSX.Element {
     clearFeedback();
     const trimmedPartner = partnerNameInput.trim();
     const cleanEmail = emailInput.trim().toLowerCase();
+    const cleanOtp = otpInput.trim();
 
     if (spaceMode === 'join') {
       const code = inviteCodeInput.trim().toUpperCase();
@@ -104,6 +172,7 @@ export function OnboardingScreen(): React.JSX.Element {
           partnerName: trimmedPartner,
           mode: 'join',
           inviteCode: code,
+          otpCode: cleanOtp,
         });
       } catch {
         // Error banner already handled by DuaSakuContext
@@ -119,6 +188,7 @@ export function OnboardingScreen(): React.JSX.Element {
         partnerName: trimmedPartner,
         mode: 'create',
         coupleName: trimmedCouple,
+        otpCode: cleanOtp,
       });
     } catch {
       // Error banner already handled by DuaSakuContext
@@ -297,6 +367,14 @@ export function OnboardingScreen(): React.JSX.Element {
                 >
                   {loading ? 'Memproses...' : 'Masuk ke Ruang'}
                 </PressableButton>
+
+                <TouchableOpacity
+                  style={styles.forgotLinkWrap}
+                  onPress={() => goToStep('forgot_password')}
+                  testID="login-forgot-password-btn"
+                >
+                  <Text style={styles.forgotLinkText}>Lupa Password?</Text>
+                </TouchableOpacity>
               </View>
 
               <PressableButton
@@ -366,6 +444,41 @@ export function OnboardingScreen(): React.JSX.Element {
                   placeholder="nama@email.com"
                   placeholderTextColor={COLORS.textPlaceholder}
                   testID="register-email-input"
+                />
+
+                <View style={styles.otpActionRow}>
+                  <Text style={[styles.label, styles.otpLabelNoMargin]}>Kode OTP (6 Digit)</Text>
+                  <PressableButton
+                    variant="secondary"
+                    size="sm"
+                    onPress={() => handleSendOtp('register')}
+                    disabled={otpSending || loading}
+                    testID="register-send-otp-btn"
+                  >
+                    {otpSending ? 'Mengirim...' : 'Kirim Kode OTP'}
+                  </PressableButton>
+                </View>
+
+                {!!devOtpHint && (
+                  <View style={styles.devOtpNotice} testID="register-dev-otp-notice">
+                    <Text style={styles.devOtpNoticeText}>
+                      Mode lokal: gunakan kode OTP <Text style={styles.devOtpCode}>{devOtpHint}</Text>
+                    </Text>
+                  </View>
+                )}
+
+                <TextInput
+                  style={[styles.input, styles.codeInput]}
+                  value={otpInput}
+                  onChangeText={(text) => {
+                    setOtpInput(text.replace(/[^0-9]/g, '').slice(0, 6));
+                    if (localError) setLocalError(null);
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  placeholder="000000"
+                  placeholderTextColor={COLORS.textPlaceholder}
+                  testID="register-otp-input"
                 />
 
                 <Text style={styles.label}>Password</Text>
@@ -571,6 +684,121 @@ export function OnboardingScreen(): React.JSX.Element {
               >
                 Sudah terdaftar? <Text style={styles.switchLinkBold}>Masuk</Text>
               </PressableButton>
+            </View>
+          )}
+
+          {step === 'forgot_password' && (
+            <View style={styles.formContainer}>
+              <View style={styles.topBar}>
+                <PressableButton
+                  variant="ghost"
+                  size="sm"
+                  onPress={() => goToStep('login')}
+                  testID="onboarding-back-btn"
+                >
+                  ← Kembali
+                </PressableButton>
+              </View>
+
+              <Text style={styles.stepTitle}>Reset Password</Text>
+              <Text style={styles.stepSubtitle}>
+                Masukkan email terdaftar, kirim kode OTP 6 digit, lalu atur password barumu.
+              </Text>
+
+              <View style={styles.card}>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  style={styles.input}
+                  value={emailInput}
+                  onChangeText={(text) => {
+                    setEmailInput(text);
+                    if (localError) setLocalError(null);
+                  }}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  placeholder="nama@email.com"
+                  placeholderTextColor={COLORS.textPlaceholder}
+                  testID="forgot-email-input"
+                />
+
+                <View style={styles.otpActionRow}>
+                  <Text style={[styles.label, styles.otpLabelNoMargin]}>Kode OTP (6 Digit)</Text>
+                  <PressableButton
+                    variant="secondary"
+                    size="sm"
+                    onPress={() => handleSendOtp('reset_password')}
+                    disabled={otpSending || loading}
+                    testID="forgot-send-otp-btn"
+                  >
+                    {otpSending ? 'Mengirim...' : 'Kirim Kode OTP'}
+                  </PressableButton>
+                </View>
+
+                {!!devOtpHint && (
+                  <View style={styles.devOtpNotice} testID="forgot-dev-otp-notice">
+                    <Text style={styles.devOtpNoticeText}>
+                      Mode lokal: gunakan kode OTP <Text style={styles.devOtpCode}>{devOtpHint}</Text>
+                    </Text>
+                  </View>
+                )}
+
+                <TextInput
+                  style={[styles.input, styles.codeInput]}
+                  value={otpInput}
+                  onChangeText={(text) => {
+                    setOtpInput(text.replace(/[^0-9]/g, '').slice(0, 6));
+                    if (localError) setLocalError(null);
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  placeholder="000000"
+                  placeholderTextColor={COLORS.textPlaceholder}
+                  testID="forgot-otp-input"
+                />
+
+                <Text style={styles.label}>Password Baru</Text>
+                <View style={styles.passwordWrap}>
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    value={newPasswordInput}
+                    onChangeText={(text) => {
+                      setNewPasswordInput(text);
+                      if (localError) setLocalError(null);
+                    }}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    placeholder="Minimal 6 karakter"
+                    placeholderTextColor={COLORS.textPlaceholder}
+                    returnKeyType="done"
+                    onSubmitEditing={handleResetPasswordSubmit}
+                    testID="forgot-new-password-input"
+                  />
+                  <PressableButton
+                    variant="ghost"
+                    size="sm"
+                    onPress={() => setShowPassword((prev) => !prev)}
+                    testID="onboarding-toggle-password"
+                  >
+                    <Text style={styles.showPwdText}>{showPassword ? 'Tutup' : 'Lihat'}</Text>
+                  </PressableButton>
+                </View>
+
+                {!!localError && (
+                  <View style={styles.inlineErrorBox} testID="onboarding-inline-error">
+                    <Text style={styles.inlineErrorText}>{localError}</Text>
+                  </View>
+                )}
+
+                <PressableButton
+                  variant="primary"
+                  size="lg"
+                  onPress={handleResetPasswordSubmit}
+                  disabled={loading}
+                  testID="forgot-submit-btn"
+                >
+                  {loading ? 'Memproses...' : 'Simpan Password Baru'}
+                </PressableButton>
+              </View>
             </View>
           )}
         </ScrollView>
@@ -914,5 +1142,42 @@ const styles = StyleSheet.create({
   switchLinkBold: {
     color: COLORS.terracottaDark,
     fontWeight: '800',
+  },
+  forgotLinkWrap: {
+    alignItems: 'center',
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.xs,
+  },
+  forgotLinkText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.terracottaDark,
+  },
+  otpActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.xs,
+  },
+  otpLabelNoMargin: {
+    marginBottom: 0,
+  },
+  devOtpNotice: {
+    backgroundColor: COLORS.sageSoft,
+    borderWidth: 1,
+    borderColor: COLORS.sage,
+    borderRadius: RADII.sm,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs + 2,
+    marginBottom: SPACING.sm,
+  },
+  devOtpNoticeText: {
+    fontSize: 12,
+    color: COLORS.textPrimary,
+  },
+  devOtpCode: {
+    fontWeight: '800',
+    letterSpacing: 2,
+    color: COLORS.sageDark,
   },
 });

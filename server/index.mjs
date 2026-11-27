@@ -1,7 +1,7 @@
 import express from 'express';
 import pg from 'pg';
 import dotenv from 'dotenv';
-import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -662,6 +662,7 @@ const mem = {
   recurringRules: new Map(), // coupleId -> RecurringRule[]
   debtLoans: new Map(), // coupleId -> DebtLoan[]
   quickPresets: new Map(), // coupleId -> QuickPreset[]
+  emailOtps: new Map(), // `${email}:${purpose}` -> { email, purpose, codeHash, attempts, expiresAtMs, createdAtMs }
 };
 
 const usePg = Boolean(process.env.DATABASE_URL);
@@ -1070,11 +1071,214 @@ function verifyPassword(password, stored) {
   return timingSafeEqual(expected, actual);
 }
 
+const OTP_RE = /^\d{6}$/;
+const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_COOLDOWN_MS = 30 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+
+function hashOtp(cleanEmail, purpose, code) {
+  return createHash('sha256').update(`${cleanEmail}:${purpose}:${code}`).digest('hex');
+}
+
+async function sendOtpEmail(email, code, purpose) {
+  const isReset = purpose === 'reset_password';
+  const subject = isReset
+    ? 'Kode Reset Password DuaSaku'
+    : 'Kode Verifikasi Pendaftaran DuaSaku';
+  const actionLabel = isReset ? 'mereset password akun' : 'mendaftarkan akun';
+  const html = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#2E231D;">
+      <h2 style="margin:0 0 12px;color:#C86446;">DuaSaku</h2>
+      <p style="margin:0 0 16px;">Gunakan kode OTP 6 digit berikut untuk ${actionLabel} DuaSaku Anda:</p>
+      <div style="font-size:28px;font-weight:800;letter-spacing:6px;padding:14px 20px;background:#FBF7F2;border:1px solid #E5D7CA;border-radius:10px;text-align:center;margin-bottom:16px;">
+        ${code}
+      </div>
+      <p style="margin:0;font-size:13px;color:#6E5A4F;">Kode ini berlaku selama 10 menit. Jangan bagikan kode ini kepada siapa pun.</p>
+    </div>
+  `;
+
+  if (process.env.RESEND_API_KEY) {
+    const resp = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM || 'DuaSaku <onboarding@resend.dev>',
+        to: [email],
+        subject,
+        html,
+      }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.text().catch(() => '');
+      console.error(`[OTP EMAIL ERROR] ${resp.status} ${errBody}`);
+      throw new HttpError(502, 'Gagal mengirim email OTP. Silakan coba lagi.');
+    }
+    return { sent: true };
+  }
+
+  console.log(`[OTP DEV] ${purpose} ${email}: ${code}`);
+  return {
+    sent: true,
+    devOtp: process.env.NODE_ENV !== 'production' ? code : undefined,
+  };
+}
+
+async function verifyAndConsumeOtp(cleanEmail, purpose, otpCode) {
+  const cleanOtp = String(otpCode || '').trim();
+  if (!OTP_RE.test(cleanOtp)) {
+    throw new HttpError(400, 'Kode OTP 6 digit wajib diisi.');
+  }
+  const candidateHash = hashOtp(cleanEmail, purpose, cleanOtp);
+
+  if (pool) {
+    const otpRes = await pool.query(
+      'SELECT code_hash, attempts, expires_at FROM email_otps WHERE email = $1 AND purpose = $2',
+      [cleanEmail, purpose]
+    );
+    if (!otpRes.rowCount) {
+      throw new HttpError(400, 'Kode OTP belum dikirim atau sudah kedaluwarsa.');
+    }
+    const row = otpRes.rows[0];
+    if (row.attempts >= OTP_MAX_ATTEMPTS) {
+      throw new HttpError(429, 'Terlalu banyak percobaan OTP. Silakan minta kode baru.');
+    }
+    if (new Date(row.expires_at).getTime() <= Date.now()) {
+      await pool.query('DELETE FROM email_otps WHERE email = $1 AND purpose = $2', [
+        cleanEmail,
+        purpose,
+      ]);
+      throw new HttpError(400, 'Kode OTP sudah kedaluwarsa. Silakan minta kode baru.');
+    }
+    const expectedBuf = Buffer.from(row.code_hash, 'hex');
+    const actualBuf = Buffer.from(candidateHash, 'hex');
+    if (expectedBuf.length !== actualBuf.length || !timingSafeEqual(expectedBuf, actualBuf)) {
+      await pool.query(
+        'UPDATE email_otps SET attempts = attempts + 1 WHERE email = $1 AND purpose = $2',
+        [cleanEmail, purpose]
+      );
+      throw new HttpError(400, 'Kode OTP tidak sesuai.');
+    }
+    await pool.query('DELETE FROM email_otps WHERE email = $1 AND purpose = $2', [
+      cleanEmail,
+      purpose,
+    ]);
+    return;
+  }
+
+  const key = `${cleanEmail}:${purpose}`;
+  const entry = mem.emailOtps.get(key);
+  if (!entry) {
+    throw new HttpError(400, 'Kode OTP belum dikirim atau sudah kedaluwarsa.');
+  }
+  if (entry.attempts >= OTP_MAX_ATTEMPTS) {
+    throw new HttpError(429, 'Terlalu banyak percobaan OTP. Silakan minta kode baru.');
+  }
+  if (entry.expiresAtMs <= Date.now()) {
+    mem.emailOtps.delete(key);
+    throw new HttpError(400, 'Kode OTP sudah kedaluwarsa. Silakan minta kode baru.');
+  }
+  const expectedBuf = Buffer.from(entry.codeHash, 'hex');
+  const actualBuf = Buffer.from(candidateHash, 'hex');
+  if (expectedBuf.length !== actualBuf.length || !timingSafeEqual(expectedBuf, actualBuf)) {
+    entry.attempts += 1;
+    throw new HttpError(400, 'Kode OTP tidak sesuai.');
+  }
+  mem.emailOtps.delete(key);
+}
+
+// Send 6-digit email OTP for registration or password reset
+app.post(
+  '/api/auth/send-otp',
+  asyncHandler(async (req, res) => {
+    const { email, purpose } = req.body || {};
+    const cleanEmail = normalizeEmail(email);
+    if (!EMAIL_RE.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Format email tidak valid.' });
+    }
+    if (purpose !== 'register' && purpose !== 'reset_password') {
+      return res.status(400).json({ error: 'Purpose OTP harus register atau reset_password.' });
+    }
+
+    const nowMs = Date.now();
+    const expiresAtMs = nowMs + OTP_TTL_MS;
+    const code = String(randomInt(0, 1000000)).padStart(6, '0');
+    const codeHash = hashOtp(cleanEmail, purpose, code);
+
+    if (pool) {
+      const existingPartner = await pool.query(
+        'SELECT id FROM partners WHERE LOWER(email) = $1',
+        [cleanEmail]
+      );
+      if (purpose === 'register' && existingPartner.rowCount > 0) {
+        return res.status(409).json({ error: 'Email sudah terdaftar. Silakan masuk dengan akun Anda.' });
+      }
+      if (purpose === 'reset_password' && existingPartner.rowCount === 0) {
+        return res.status(404).json({ error: 'Email belum terdaftar di DuaSaku.' });
+      }
+
+      const existingOtp = await pool.query(
+        'SELECT created_at FROM email_otps WHERE email = $1 AND purpose = $2',
+        [cleanEmail, purpose]
+      );
+      if (existingOtp.rowCount > 0) {
+        const createdMs = new Date(existingOtp.rows[0].created_at).getTime();
+        if (nowMs - createdMs < OTP_COOLDOWN_MS) {
+          return res.status(429).json({ error: 'Tunggu 30 detik sebelum meminta kode OTP baru.' });
+        }
+      }
+
+      await pool.query(
+        `INSERT INTO email_otps(email, purpose, code_hash, attempts, expires_at, created_at)
+         VALUES($1, $2, $3, 0, $4, now())
+         ON CONFLICT (email, purpose) DO UPDATE
+         SET code_hash = EXCLUDED.code_hash,
+             attempts = 0,
+             expires_at = EXCLUDED.expires_at,
+             created_at = now()`,
+        [cleanEmail, purpose, codeHash, new Date(expiresAtMs).toISOString()]
+      );
+    } else {
+      const existingPartner = Array.from(mem.partners.values()).find((p) => p.email === cleanEmail);
+      if (purpose === 'register' && existingPartner) {
+        return res.status(409).json({ error: 'Email sudah terdaftar. Silakan masuk dengan akun Anda.' });
+      }
+      if (purpose === 'reset_password' && !existingPartner) {
+        return res.status(404).json({ error: 'Email belum terdaftar di DuaSaku.' });
+      }
+
+      const key = `${cleanEmail}:${purpose}`;
+      const existingOtp = mem.emailOtps.get(key);
+      if (existingOtp && nowMs - existingOtp.createdAtMs < OTP_COOLDOWN_MS) {
+        return res.status(429).json({ error: 'Tunggu 30 detik sebelum meminta kode OTP baru.' });
+      }
+      mem.emailOtps.set(key, {
+        email: cleanEmail,
+        purpose,
+        codeHash,
+        attempts: 0,
+        expiresAtMs,
+        createdAtMs: nowMs,
+      });
+    }
+
+    const emailResult = await sendOtpEmail(cleanEmail, code, purpose);
+    res.json({
+      ok: true,
+      message: 'Kode OTP dikirim ke email Anda.',
+      ...(emailResult.devOtp ? { devOtp: emailResult.devOtp } : {}),
+    });
+  })
+);
+
 // Register with email & password (creates new couple space or joins existing via inviteCode)
 app.post(
   '/api/auth/register',
   asyncHandler(async (req, res) => {
-    const { email, password, partnerName, mode = 'create', coupleName, inviteCode } = req.body || {};
+    const { email, password, partnerName, mode = 'create', coupleName, inviteCode, otpCode } =
+      req.body || {};
     const cleanEmail = normalizeEmail(email);
     if (!EMAIL_RE.test(cleanEmail)) {
       return res.status(400).json({ error: 'Format email tidak valid.' });
@@ -1088,6 +1292,10 @@ app.post(
     }
     if (mode !== 'create' && mode !== 'join') {
       return res.status(400).json({ error: 'Mode registrasi harus create atau join.' });
+    }
+    const cleanOtp = String(otpCode || '').trim();
+    if (!OTP_RE.test(cleanOtp)) {
+      return res.status(400).json({ error: 'Kode OTP 6 digit wajib diisi.' });
     }
 
     const passwordHash = hashPassword(password);
@@ -1109,6 +1317,7 @@ app.post(
         if (!cRes.rowCount) {
           return res.status(404).json({ error: 'Kode undangan pasangan tidak ditemukan.' });
         }
+        await verifyAndConsumeOtp(cleanEmail, 'register', cleanOtp);
         const couple = cRes.rows[0];
         await pool.query(
           'INSERT INTO partners(id, couple_id, name, role_label, avatar_color, token, email, password_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
@@ -1127,6 +1336,7 @@ app.post(
         });
       }
 
+      await verifyAndConsumeOtp(cleanEmail, 'register', cleanOtp);
       const coupleId = randomUUID();
       const newInviteCode = makeInviteCode();
       const cleanCoupleName = String(coupleName || `Dompet ${cleanPartnerName}`).trim();
@@ -1168,6 +1378,7 @@ app.post(
       if (!couple) {
         return res.status(404).json({ error: 'Kode undangan pasangan tidak ditemukan.' });
       }
+      await verifyAndConsumeOtp(cleanEmail, 'register', cleanOtp);
       const partner = {
         id: partnerId,
         coupleId: couple.id,
@@ -1193,6 +1404,7 @@ app.post(
       });
     }
 
+    await verifyAndConsumeOtp(cleanEmail, 'register', cleanOtp);
     const coupleId = randomUUID();
     const newInviteCode = makeInviteCode();
     const cleanCoupleName = String(coupleName || `Dompet ${cleanPartnerName}`).trim();
@@ -1223,6 +1435,61 @@ app.post(
         roleLabel: partner.roleLabel,
         avatarColor: partner.avatarColor,
       },
+    });
+  })
+);
+
+// Reset password using 6-digit email OTP
+app.post(
+  '/api/auth/reset-password',
+  asyncHandler(async (req, res) => {
+    const { email, otpCode, newPassword } = req.body || {};
+    const cleanEmail = normalizeEmail(email);
+    if (!EMAIL_RE.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Format email tidak valid.' });
+    }
+    const cleanOtp = String(otpCode || '').trim();
+    if (!OTP_RE.test(cleanOtp)) {
+      return res.status(400).json({ error: 'Kode OTP 6 digit wajib diisi.' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password baru minimal 6 karakter.' });
+    }
+
+    const newHash = hashPassword(newPassword);
+    const newToken = makeToken();
+
+    if (pool) {
+      const pRes = await pool.query('SELECT id FROM partners WHERE LOWER(email) = $1', [cleanEmail]);
+      if (!pRes.rowCount) {
+        return res.status(404).json({ error: 'Email belum terdaftar di DuaSaku.' });
+      }
+      await verifyAndConsumeOtp(cleanEmail, 'reset_password', cleanOtp);
+      await pool.query('UPDATE partners SET password_hash = $1, token = $2 WHERE id = $3', [
+        newHash,
+        newToken,
+        pRes.rows[0].id,
+      ]);
+      return res.json({
+        ok: true,
+        message: 'Password berhasil diperbarui. Silakan masuk.',
+      });
+    }
+
+    const partner = Array.from(mem.partners.values()).find((p) => p.email === cleanEmail);
+    if (!partner) {
+      return res.status(404).json({ error: 'Email belum terdaftar di DuaSaku.' });
+    }
+    await verifyAndConsumeOtp(cleanEmail, 'reset_password', cleanOtp);
+    partner.passwordHash = newHash;
+    for (const [tok, pid] of mem.tokens.entries()) {
+      if (pid === partner.id) mem.tokens.delete(tok);
+    }
+    mem.tokens.set(newToken, partner.id);
+
+    res.json({
+      ok: true,
+      message: 'Password berhasil diperbarui. Silakan masuk.',
     });
   })
 );

@@ -162,3 +162,13 @@ CREATE TABLE IF NOT EXISTS quick_presets (
 
 CREATE INDEX IF NOT EXISTS idx_quick_presets_couple_created
   ON quick_presets(couple_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS email_otps (
+  email TEXT NOT NULL,
+  purpose VARCHAR(24) NOT NULL CHECK (purpose IN ('register', 'reset_password')),
+  code_hash TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (email, purpose)
+);

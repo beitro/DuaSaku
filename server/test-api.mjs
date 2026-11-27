@@ -1193,7 +1193,7 @@ try {
   assert.equal(coupleOnlyRes.partner.name, 'Dina Larasati');
 
   // ==========================================================================
-  // Suite 9: Email & Password Auth (/api/auth/register & /api/auth/login)
+  // Suite 9: Email & Password Auth + 6-digit Email OTP
   // ==========================================================================
   const uniqueSuffix = Date.now();
   const emailA = `raka.${uniqueSuffix}@duasaku.test`;
@@ -1201,15 +1201,48 @@ try {
 
   const badEmailReg = await reqStatus('/api/auth/register', {
     method: 'POST',
-    body: { email: 'not-an-email', password: 'password123', partnerName: 'Raka', mode: 'create' },
+    body: { email: 'not-an-email', password: 'password123', partnerName: 'Raka', mode: 'create', otpCode: '123456' },
   });
   assert.equal(badEmailReg.status, 400);
 
   const shortPwdReg = await reqStatus('/api/auth/register', {
     method: 'POST',
-    body: { email: emailA, password: '123', partnerName: 'Raka', mode: 'create' },
+    body: { email: emailA, password: '123', partnerName: 'Raka', mode: 'create', otpCode: '123456' },
   });
   assert.equal(shortPwdReg.status, 400);
+
+  const otpARes = await req('/api/auth/send-otp', {
+    method: 'POST',
+    body: { email: emailA, purpose: 'register' },
+  });
+  assert.equal(otpARes.ok, true);
+  assert.ok(/^\d{6}$/.test(otpARes.devOtp));
+
+  const missingOtpReg = await reqStatus('/api/auth/register', {
+    method: 'POST',
+    body: {
+      email: emailA,
+      password: 'secret-password-A',
+      partnerName: 'Raka Auth',
+      coupleName: 'Ruang Auth',
+      mode: 'create',
+    },
+  });
+  assert.equal(missingOtpReg.status, 400);
+
+  const wrongOtp = otpARes.devOtp === '000000' ? '999999' : '000000';
+  const wrongOtpReg = await reqStatus('/api/auth/register', {
+    method: 'POST',
+    body: {
+      email: emailA,
+      password: 'secret-password-A',
+      partnerName: 'Raka Auth',
+      coupleName: 'Ruang Auth',
+      mode: 'create',
+      otpCode: wrongOtp,
+    },
+  });
+  assert.equal(wrongOtpReg.status, 400);
 
   const regA = await req('/api/auth/register', {
     method: 'POST',
@@ -1219,6 +1252,7 @@ try {
       partnerName: 'Raka Auth',
       coupleName: 'Ruang Auth',
       mode: 'create',
+      otpCode: otpARes.devOtp,
     },
   });
   createdCoupleIds.push(regA.couple.id);
@@ -1232,9 +1266,17 @@ try {
       password: 'secret-password-A',
       partnerName: 'Raka Dup',
       mode: 'create',
+      otpCode: otpARes.devOtp,
     },
   });
   assert.equal(dupEmailReg.status, 409);
+
+  const otpBRes = await req('/api/auth/send-otp', {
+    method: 'POST',
+    body: { email: emailB, purpose: 'register' },
+  });
+  assert.equal(otpBRes.ok, true);
+  assert.ok(/^\d{6}$/.test(otpBRes.devOtp));
 
   const regB = await req('/api/auth/register', {
     method: 'POST',
@@ -1244,6 +1286,7 @@ try {
       partnerName: 'Nadia Auth',
       inviteCode: regA.couple.inviteCode,
       mode: 'join',
+      otpCode: otpBRes.devOtp,
     },
   });
   assert.equal(regB.couple.id, regA.couple.id);
@@ -1265,6 +1308,42 @@ try {
 
   const meCouple = await req('/api/couple', { token: loginA.token });
   assert.equal(meCouple.partners.length, 2);
+
+  // Reset password via 6-digit OTP
+  const resetOtpRes = await req('/api/auth/send-otp', {
+    method: 'POST',
+    body: { email: emailA, purpose: 'reset_password' },
+  });
+  assert.equal(resetOtpRes.ok, true);
+  assert.ok(/^\d{6}$/.test(resetOtpRes.devOtp));
+
+  const wrongResetOtp = resetOtpRes.devOtp === '000000' ? '999999' : '000000';
+  const badReset = await reqStatus('/api/auth/reset-password', {
+    method: 'POST',
+    body: { email: emailA, otpCode: wrongResetOtp, newPassword: 'new-secret-password-A' },
+  });
+  assert.equal(badReset.status, 400);
+
+  const okReset = await req('/api/auth/reset-password', {
+    method: 'POST',
+    body: { email: emailA, otpCode: resetOtpRes.devOtp, newPassword: 'new-secret-password-A' },
+  });
+  assert.equal(okReset.ok, true);
+
+  const oldPwdLogin = await reqStatus('/api/auth/login', {
+    method: 'POST',
+    body: { email: emailA, password: 'secret-password-A' },
+  });
+  assert.equal(oldPwdLogin.status, 401);
+
+  const newPwdLogin = await req('/api/auth/login', {
+    method: 'POST',
+    body: { email: emailA, password: 'new-secret-password-A' },
+  });
+  assert.equal(newPwdLogin.partner.id, regA.partner.id);
+  assert.ok(newPwdLogin.token);
+  // Update loginA token reference for subsequent checks
+  loginA.token = newPwdLogin.token;
 
   // ==========================================================================
   // Suite 10: Money Lover Features (Recurring, Debts, Presets, Receipt Parse, Bootstrap)
