@@ -243,7 +243,7 @@ export function OnboardingScreen(): React.JSX.Element {
     <AppFrame>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
           contentContainerStyle={[
@@ -251,6 +251,7 @@ export function OnboardingScreen(): React.JSX.Element {
             step === 'welcome' && styles.welcomeScrollContent,
           ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           <FeedbackBanner feedback={feedback} onDismiss={clearFeedback} />
 

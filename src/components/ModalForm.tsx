@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { useReduceMotion } from '../hooks/useReduceMotion';
 import { PressableButton } from './PressableButton';
 import { COLORS, MOTION, RADII, SHADOWS, SPACING } from '../theme/tokens';
@@ -48,6 +49,7 @@ export function ModalForm({
   cancelTestID,
 }: ModalFormProps): React.JSX.Element | null {
   const { height } = useWindowDimensions();
+  const keyboardVisible = useKeyboardVisible();
   const reduceMotion = useReduceMotion();
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const cardScale = useRef(new Animated.Value(0.95)).current;
@@ -148,12 +150,16 @@ export function ModalForm({
         ]}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardAvoiding}
         >
           <ScrollView
-            contentContainerStyle={styles.modalScroll}
+            contentContainerStyle={[
+              styles.modalScroll,
+              keyboardVisible && styles.modalScrollKeyboard,
+            ]}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
           >
             <Animated.View
@@ -232,6 +238,9 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     paddingVertical: SPACING.lg,
+  },
+  modalScrollKeyboard: {
+    justifyContent: 'flex-start',
   },
   modalCard: {
     width: '100%',

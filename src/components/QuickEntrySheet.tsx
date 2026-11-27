@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
   Platform,
@@ -14,8 +15,17 @@ import {
   View,
 } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { useReduceMotion } from '../hooks/useReduceMotion';
-import { COLORS, MOTION, QUICK_AMOUNT_PRESETS, RADII, SHADOWS, SPACING } from '../theme/tokens';
+import {
+  CATEGORY_COLOR_PRESETS,
+  COLORS,
+  MOTION,
+  QUICK_AMOUNT_PRESETS,
+  RADII,
+  SHADOWS,
+  SPACING,
+} from '../theme/tokens';
 import type { QuickPreset, TransactionType } from '../types';
 import {
   formatRp,
@@ -26,6 +36,7 @@ import {
 } from '../utils/format';
 import { parseReceiptLocally } from '../utils/receiptParser';
 import { CalculatorKeypad } from './CalculatorKeypad';
+import { ModalForm } from './ModalForm';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 export function QuickEntrySheet(): React.JSX.Element | null {
@@ -37,6 +48,7 @@ export function QuickEntrySheet(): React.JSX.Element | null {
     accounts,
     quickPresets,
     selectedMonth,
+    createCategory,
     createTransaction,
     updateTransaction,
     deleteTransaction,
@@ -46,6 +58,7 @@ export function QuickEntrySheet(): React.JSX.Element | null {
     showSuccess,
   } = useDuaSaku();
   const { height } = useWindowDimensions();
+  const keyboardVisible = useKeyboardVisible();
 
   const [type, setType] = useState<TransactionType>('expense');
   const [amountInput, setAmountInput] = useState('');
@@ -60,6 +73,13 @@ export function QuickEntrySheet(): React.JSX.Element | null {
   const [receiptText, setReceiptText] = useState('');
   const [parsingReceipt, setParsingReceipt] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryIcon, setNewCategoryIcon] = useState('✨');
+  const [newCategoryColor, setNewCategoryColor] = useState<string>(CATEGORY_COLOR_PRESETS[0]);
+  const [newCategoryTarget, setNewCategoryTarget] = useState('');
+  const [newCategoryError, setNewCategoryError] = useState<string | null>(null);
+  const [creatingCategory, setCreatingCategory] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const cameraRef = useRef<any>(null);
   const prevOpenRef = useRef(false);
@@ -342,6 +362,40 @@ export function QuickEntrySheet(): React.JSX.Element | null {
     }
   };
 
+  const openAddCategory = () => {
+    setNewCategoryName('');
+    setNewCategoryIcon('✨');
+    setNewCategoryColor(CATEGORY_COLOR_PRESETS[0]);
+    setNewCategoryTarget('');
+    setNewCategoryError(null);
+    setShowCategoryModal(true);
+  };
+
+  const handleCreateCategory = async () => {
+    setNewCategoryError(null);
+    const name = newCategoryName.trim();
+    if (name.length < 2) {
+      setNewCategoryError('Nama kategori minimal 2 karakter.');
+      return;
+    }
+    setCreatingCategory(true);
+    try {
+      const created = await createCategory({
+        name,
+        icon: newCategoryIcon.trim() || '✨',
+        color: newCategoryColor,
+        targetAmount: parseIdrInput(newCategoryTarget),
+      });
+      setCategoryId(created.id);
+      setShowCategoryModal(false);
+      showSuccess(`Kategori "${created.name}" ditambahkan.`);
+    } catch {
+      // Error surfaced via FeedbackBanner
+    } finally {
+      setCreatingCategory(false);
+    }
+  };
+
   return (
     <>
     <Modal
@@ -358,15 +412,19 @@ export function QuickEntrySheet(): React.JSX.Element | null {
           { opacity: backdropOpacity },
         ]}
       >
-        <Animated.View
-          style={[
-            styles.card,
-            {
-              opacity: sheetOpacity,
-              transform: [{ translateY: sheetTranslateY }],
-            },
-          ]}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardAvoiding}
         >
+          <Animated.View
+            style={[
+              styles.card,
+              {
+                opacity: sheetOpacity,
+                transform: [{ translateY: sheetTranslateY }],
+              },
+            ]}
+          >
           <View {...panResponder.panHandlers}>
             <View style={styles.grabberContainer}>
               <View style={styles.grabber} />
@@ -381,7 +439,12 @@ export function QuickEntrySheet(): React.JSX.Element | null {
             </View>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: height * 0.72 }}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            style={{ maxHeight: height * (keyboardVisible ? 0.5 : 0.72) }}
+          >
             {/* Type Toggle */}
             <View style={styles.segmentRow}>
               <TouchableOpacity
@@ -537,7 +600,17 @@ export function QuickEntrySheet(): React.JSX.Element | null {
             </ScrollView>
 
             {/* Category */}
-            <Text style={styles.label}>Kategori / Pos</Text>
+            <View style={styles.labelActionRow}>
+              <Text style={styles.label}>Kategori / Pos</Text>
+              <TouchableOpacity
+                style={styles.addCategoryBtn}
+                onPress={openAddCategory}
+                disabled={creatingCategory}
+                testID="quick-entry-add-category-btn"
+              >
+                <Text style={styles.addCategoryBtnText}>＋ Tambah</Text>
+              </TouchableOpacity>
+            </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
               {categories.map((cat) => {
                 const selected = categoryId === cat.id;
@@ -653,9 +726,77 @@ export function QuickEntrySheet(): React.JSX.Element | null {
               )}
             </TouchableOpacity>
           </View>
-        </Animated.View>
+          </Animated.View>
+        </KeyboardAvoidingView>
       </Animated.View>
     </Modal>
+    {showCategoryModal && (
+      <ModalForm
+        visible={showCategoryModal}
+        onClose={() => setShowCategoryModal(false)}
+        title="Tambah Kategori Baru"
+        onSubmit={handleCreateCategory}
+        submitting={creatingCategory}
+        submitLabel="Tambah Kategori"
+        submitTestID="quick-new-category-save-btn"
+        cancelTestID="quick-new-category-cancel-btn"
+      >
+        <Text style={styles.label}>Nama Kategori</Text>
+        <TextInput
+          style={styles.input}
+          value={newCategoryName}
+          onChangeText={(text) => {
+            setNewCategoryName(text);
+            if (newCategoryError) setNewCategoryError(null);
+          }}
+          placeholder="Contoh: Dana Darurat"
+          placeholderTextColor={COLORS.textPlaceholder}
+          testID="quick-new-category-name-input"
+        />
+        <Text style={styles.label}>Ikon Emoji</Text>
+        <TextInput
+          style={styles.input}
+          value={newCategoryIcon}
+          onChangeText={setNewCategoryIcon}
+          placeholder="✨"
+          placeholderTextColor={COLORS.textPlaceholder}
+          maxLength={8}
+          testID="quick-new-category-icon-input"
+        />
+        <Text style={styles.label}>Warna Aksen</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll}>
+          {CATEGORY_COLOR_PRESETS.map((preset, idx) => (
+            <TouchableOpacity
+              key={preset}
+              style={[
+                styles.colorSwatch,
+                { backgroundColor: preset },
+                newCategoryColor === preset && styles.colorSwatchActive,
+              ]}
+              onPress={() => setNewCategoryColor(preset)}
+              accessibilityRole="button"
+              accessibilityLabel={`Pilih warna ${preset}`}
+              testID={`quick-new-category-color-${idx}`}
+            />
+          ))}
+        </ScrollView>
+        <Text style={styles.label}>Target Anggaran (Opsional)</Text>
+        <TextInput
+          style={styles.input}
+          keyboardType="numeric"
+          value={newCategoryTarget}
+          onChangeText={setNewCategoryTarget}
+          placeholder="Contoh: 25000000"
+          placeholderTextColor={COLORS.textPlaceholder}
+          testID="quick-new-category-target-input"
+        />
+        {!!newCategoryError && (
+          <View style={styles.inlineErrorBox}>
+            <Text style={styles.inlineErrorText}>{newCategoryError}</Text>
+          </View>
+        )}
+      </ModalForm>
+    )}
     {showCamera && (
       <Modal visible transparent animationType="slide">
         <View style={{ flex: 1, backgroundColor: '#000' }}>
@@ -830,6 +971,34 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: COLORS.textOnDark,
+  },
+  keyboardAvoiding: {
+    width: '100%',
+    maxWidth: 460,
+  },
+  addCategoryBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: RADII.pill,
+    borderWidth: 1,
+    borderColor: COLORS.heroCocoa,
+  },
+  addCategoryBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.heroCocoa,
+  },
+  colorSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: RADII.pill,
+    marginRight: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  colorSwatchActive: {
+    borderColor: COLORS.textPrimary,
+    transform: [{ scale: 1.12 }],
   },
   input: {
     backgroundColor: COLORS.bgCream,
