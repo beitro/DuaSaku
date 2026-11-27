@@ -518,10 +518,10 @@ export function OnboardingScreen(): React.JSX.Element {
                     variant="secondary"
                     size="sm"
                     onPress={() => handleSendOtp('register')}
-                    disabled={otpSending || loading}
+                    disabled={true}
                     testID="register-send-otp-btn"
                   >
-                    {otpSending ? 'Mengirim...' : 'Kirim Kode OTP'}
+                    Kirim Kode OTP (segera)
                   </PressableButton>
                 </View>
 
@@ -789,10 +789,10 @@ export function OnboardingScreen(): React.JSX.Element {
                     variant="secondary"
                     size="sm"
                     onPress={() => handleSendOtp('reset_password')}
-                    disabled={otpSending || loading}
+                    disabled={true}
                     testID="forgot-send-otp-btn"
                   >
-                    {otpSending ? 'Mengirim...' : 'Kirim Kode OTP'}
+                    Kirim Kode OTP (segera)
                   </PressableButton>
                 </View>
 
