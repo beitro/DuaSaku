@@ -25,6 +25,7 @@ import { BudgetsScreen } from './src/screens/BudgetsScreen';
 import { CategoriesScreen } from './src/screens/CategoriesScreen';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { NotesScreen } from './src/screens/NotesScreen';
+import { SettingsScreen } from './src/screens/SettingsScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { TransactionsScreen } from './src/screens/TransactionsScreen';
 import { COLORS, RADII, SPACING } from './src/theme/tokens';
@@ -217,6 +218,14 @@ function AppContent(): React.JSX.Element {
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={styles.addTxBtn}
+              onPress={() => setActiveTab('settings')}
+              accessibilityRole="button"
+              testID="header-settings-btn"
+            >
+              <Text style={styles.addTxBtnText}>⚙️</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.addTxBtn}
               onPress={() => openNewTransaction('expense')}
               accessibilityRole="button"
               testID="header-add-tx-btn"
@@ -318,6 +327,7 @@ function AppContent(): React.JSX.Element {
         {activeTab === 'budgets' && <BudgetsScreen />}
         {activeTab === 'categories' && <CategoriesScreen />}
         {activeTab === 'notes' && <NotesScreen />}
+        {activeTab === 'settings' && <SettingsScreen />}
       </ScrollView>
 
       {/* 5-Tab Bottom Bar */}

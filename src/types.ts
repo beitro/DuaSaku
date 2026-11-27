@@ -11,7 +11,8 @@ export type TabKey =
   | 'accounts'
   | 'budgets'
   | 'categories'
-  | 'notes';
+  | 'notes'
+  | 'settings';
 
 export interface PartnerProfile {
   id: string;
