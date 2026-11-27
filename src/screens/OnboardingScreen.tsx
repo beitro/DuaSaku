@@ -829,6 +829,8 @@ const styles = StyleSheet.create({
   },
   optionCard: {
     flex: 1,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     backgroundColor: COLORS.bgCream,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
