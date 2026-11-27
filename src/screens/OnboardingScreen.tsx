@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,8 +12,6 @@ import {
 } from 'react-native';
 import { AppFrame } from '../components/AppFrame';
 import { FeedbackBanner } from '../components/FeedbackBanner';
-import { DashboardHero } from '../components/DashboardHero';
-import { ChipGroup } from '../components/ChipGroup';
 import { PressableButton } from '../components/PressableButton';
 import { useDuaSaku } from '../context/DuaSakuContext';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
@@ -46,6 +44,9 @@ export function OnboardingScreen(): React.JSX.Element {
   const [coupleNameInput, setCoupleNameInput] = useState('Dompet Masa Depan');
   const [inviteCodeInput, setInviteCodeInput] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+
+  const registerOtpRef = useRef<any>(null);
+  const forgotOtpRef = useRef<any>(null);
 
   const goToStep = (next: FlowStep) => {
     setStep(next);
@@ -195,6 +196,48 @@ export function OnboardingScreen(): React.JSX.Element {
     }
   };
 
+  // Helper: render 6-box OTP UI
+  const renderOtpBoxes = (
+    value: string,
+    inputRef: React.RefObject<any>,
+    testId: string,
+    onChangeText: (text: string) => void,
+  ) => (
+    <View>
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={() => inputRef.current?.focus()}
+        style={styles.otpBoxRow}
+      >
+        {Array.from({ length: 6 }).map((_, i) => {
+          const char = value[i];
+          const filled = !!char;
+          return (
+            <View key={i} style={[styles.otpBox, filled && styles.otpBoxFilled]}>
+              {filled ? (
+                <Text style={styles.otpBoxText}>{char}</Text>
+              ) : (
+                <Text style={styles.otpBoxPlaceholder}>•</Text>
+              )}
+            </View>
+          );
+        })}
+      </TouchableOpacity>
+      <TextInput
+        ref={inputRef}
+        style={{ position: 'absolute', opacity: 0, width: 1, height: 1 }}
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType="number-pad"
+        maxLength={6}
+        testID={testId}
+      />
+      <Text style={styles.otpMicroCopy}>
+        Cek inbox kamu ya, OTP dikirim dalam detik! 📬
+      </Text>
+    </View>
+  );
+
   return (
     <AppFrame>
       <KeyboardAvoidingView
@@ -212,34 +255,41 @@ export function OnboardingScreen(): React.JSX.Element {
 
           {step === 'welcome' && (
             <View style={styles.welcomeContainer}>
-              <Text style={styles.logoText}>💰 DuaSaku</Text>
-              <DashboardHero
-                kicker="DUASAKU · KEUANGAN PASANGAN"
-                amount="Rp 14.650.000"
-                subtitle="Dompet Masa Depan · Raka & Nadia"
-                padding="xl"
-                testID="onboarding-hero"
-                children={
-                  <View style={styles.heroChipsRow} testID="onboarding-hero-chips">
-                    <View style={styles.heroChip}>
-                      <Text style={styles.heroChipText}>💍 Menikah · 68%</Text>
-                    </View>
-                    <View style={styles.heroChip}>
-                      <Text style={styles.heroChipText}>✈️ Traveling</Text>
-                    </View>
-                    <View style={styles.heroChip}>
-                      <Text style={styles.heroChipText}>📈 Investasi</Text>
-                    </View>
-                  </View>
-                }
-              />
+              {/* Decorative blobs */}
+              <View style={styles.blobA} pointerEvents="none" />
+              <View style={styles.blobB} pointerEvents="none" />
+              <View style={styles.blobC} pointerEvents="none" />
 
-              <Text style={styles.welcomeTitle}>Atur Uang Berdua, Tanpa Drama.</Text>
-              <Text style={styles.welcomeSubtitle}>
-                Satu ruang hangat untuk pantau pemasukan, pengeluaran, dan tabungan impian kalian
-                secara real-time.
+              {/* Logo / badge area */}
+              <View style={styles.genZBadge}>
+                <Text style={styles.genZBadgeText}>💑 DUASAKU</Text>
+              </View>
+              <Text style={styles.genZHeadline}>{'Duit Berdua,\nNo Drama. 💸'}</Text>
+              <Text style={styles.genZSubtext}>
+                Satu ruang hangat buat kelola keuangan kalian bareng — real-time, jelas, tanpa berantem.
               </Text>
 
+              {/* Inline mock card */}
+              <View style={styles.mockCard} testID="onboarding-hero">
+                <View style={styles.mockCardEyebrow}>
+                  <Text style={styles.mockCardEyebrowText}>TOTAL BERSAMA</Text>
+                  <Text style={styles.mockCardEyebrowText}>Raka & Nadia 💑</Text>
+                </View>
+                <Text style={styles.mockCardAmount}>Rp 14.650.000</Text>
+                <View style={styles.heroChipsRow} testID="onboarding-hero-chips">
+                  <View style={styles.heroChip}>
+                    <Text style={styles.heroChipText}>💍 Menikah 68%</Text>
+                  </View>
+                  <View style={styles.heroChip}>
+                    <Text style={styles.heroChipText}>✈️ Traveling</Text>
+                  </View>
+                  <View style={styles.heroChip}>
+                    <Text style={styles.heroChipText}>📈 Investasi</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Value props */}
               <View style={styles.valuePropsList}>
                 <View style={styles.valuePropRow}>
                   <View style={[styles.valueIconBadge, { backgroundColor: COLORS.terracottaSoft }]}>
@@ -267,6 +317,15 @@ export function OnboardingScreen(): React.JSX.Element {
                 </View>
               </View>
 
+              {/* Social proof chip */}
+              <View style={styles.socialProofRow}>
+                <View style={styles.socialProofPill}>
+                  <Text style={{ fontSize: 16 }}>🫶</Text>
+                  <Text style={styles.socialProofText}>1.200+ pasangan udah mulai</Text>
+                </View>
+              </View>
+
+              {/* CTA buttons */}
               <View style={styles.welcomeCtaStack}>
                 <PressableButton
                   variant="primary"
@@ -276,16 +335,17 @@ export function OnboardingScreen(): React.JSX.Element {
                 >
                   Buat Akun
                 </PressableButton>
+                <View style={{ marginBottom: 10 }} />
                 <PressableButton
                   variant="secondary"
                   size="lg"
                   onPress={() => goToStep('login')}
                   testID="welcome-login-btn"
                 >
-                  Masuk
+                  Sudah Punya Akun? Masuk →
                 </PressableButton>
                 <Text style={styles.microFooter}>
-                  Gratis untuk mulai · Siap dipakai berdua dalam 1 menit
+                  ✨ Gratis selamanya untuk mulai · Siap dalam 1 menit
                 </Text>
               </View>
             </View>
@@ -304,13 +364,13 @@ export function OnboardingScreen(): React.JSX.Element {
                               </PressableButton>
                             </View>
 
-              <Text style={styles.stepTitle}>Senang Melihatmu Lagi</Text>
+              <Text style={styles.stepTitle}>{'Senang Lihat\nKamu Lagi 👋'}</Text>
               <Text style={styles.stepSubtitle}>
-                Masuk dengan email dan password untuk lanjut mengelola ruang keuangan kalian.
+                Masuk dan lanjut kelola keuangan kalian bareng.
               </Text>
 
               <View style={styles.card}>
-                <Text style={styles.label}>Email</Text>
+                <Text style={styles.label}>📧 Email</Text>
                 <TextInput
                   style={styles.input}
                   value={emailInput}
@@ -325,7 +385,7 @@ export function OnboardingScreen(): React.JSX.Element {
                   testID="login-email-input"
                 />
 
-                <Text style={styles.label}>Password</Text>
+                <Text style={styles.label}>🔑 Password</Text>
                 <View style={styles.passwordWrap}>
                   <TextInput
                     style={[styles.input, styles.passwordInput]}
@@ -373,7 +433,7 @@ export function OnboardingScreen(): React.JSX.Element {
                   onPress={() => goToStep('forgot_password')}
                   testID="login-forgot-password-btn"
                 >
-                  <Text style={styles.forgotLinkText}>Lupa Password?</Text>
+                  <Text style={styles.forgotLinkText}>Lupa password? Tenang aja →</Text>
                 </TouchableOpacity>
               </View>
 
@@ -383,7 +443,7 @@ export function OnboardingScreen(): React.JSX.Element {
                 onPress={() => goToStep('register_account')}
                 testID="switch-to-register-btn"
               >
-                Belum punya akun? <Text style={styles.switchLinkBold}>Buat Akun</Text>
+                Belum punya akun? Yuk daftar →
               </PressableButton>
             </View>
           )}
@@ -408,14 +468,13 @@ export function OnboardingScreen(): React.JSX.Element {
                 <View style={[styles.progressFill, { width: '50%' }]} />
               </View>
 
-              <Text style={styles.stepTitle}>Kenalan Dulu, Yuk</Text>
+              <Text style={styles.stepTitle}>Kenalan Dulu, Yuk! 🌱</Text>
               <Text style={styles.stepSubtitle}>
-                Buat akun pribadimu dulu. Setelah ini, kamu tinggal buat ruang baru atau gabung
-                dengan pasangan.
+                Bikin akun dulu. Kita sambungkan kalian berdua di langkah berikutnya.
               </Text>
 
               <View style={styles.card}>
-                <Text style={styles.label}>Nama Panggilan</Text>
+                <Text style={styles.label}>✏️ Nama Panggilan</Text>
                 <TextInput
                   style={styles.input}
                   value={partnerNameInput}
@@ -431,7 +490,7 @@ export function OnboardingScreen(): React.JSX.Element {
                   Nama ini akan tampil di setiap catatan transaksimu.
                 </Text>
 
-                <Text style={styles.label}>Email</Text>
+                <Text style={styles.label}>📧 Email</Text>
                 <TextInput
                   style={styles.input}
                   value={emailInput}
@@ -467,21 +526,17 @@ export function OnboardingScreen(): React.JSX.Element {
                   </View>
                 )}
 
-                <TextInput
-                  style={[styles.input, styles.codeInput]}
-                  value={otpInput}
-                  onChangeText={(text) => {
+                {renderOtpBoxes(
+                  otpInput,
+                  registerOtpRef,
+                  'register-otp-input',
+                  (text) => {
                     setOtpInput(text.replace(/[^0-9]/g, '').slice(0, 6));
                     if (localError) setLocalError(null);
-                  }}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  placeholder="000000"
-                  placeholderTextColor={COLORS.textPlaceholder}
-                  testID="register-otp-input"
-                />
+                  },
+                )}
 
-                <Text style={styles.label}>Password</Text>
+                <Text style={styles.label}>🔑 Password</Text>
                 <View style={styles.passwordWrap}>
                   <TextInput
                     style={[styles.input, styles.passwordInput]}
@@ -530,7 +585,7 @@ export function OnboardingScreen(): React.JSX.Element {
                 onPress={() => goToStep('login')}
                 testID="switch-to-login-btn"
               >
-                Sudah punya akun? <Text style={styles.switchLinkBold}>Masuk</Text>
+                Sudah punya akun? Masuk →
               </PressableButton>
             </View>
           )}
@@ -555,9 +610,9 @@ export function OnboardingScreen(): React.JSX.Element {
                 <View style={[styles.progressFill, { width: '100%' }]} />
               </View>
 
-              <Text style={styles.stepTitle}>Siapkan Ruang Berdua</Text>
+              <Text style={styles.stepTitle}>{'Siapkan Ruang\nKalian Berdua 🏠'}</Text>
               <Text style={styles.stepSubtitle}>
-                Halo, {partnerNameInput.trim()}! Pilih cara menghubungkan keuangan kalian.
+                Halo, {partnerNameInput.trim()}! Sekarang sambungkan akun kalian.
               </Text>
 
               <View style={styles.card}>
@@ -700,9 +755,9 @@ export function OnboardingScreen(): React.JSX.Element {
                 </PressableButton>
               </View>
 
-              <Text style={styles.stepTitle}>Reset Password</Text>
+              <Text style={styles.stepTitle}>{'Reset Password\nYuk! 🔐'}</Text>
               <Text style={styles.stepSubtitle}>
-                Masukkan email terdaftar, kirim kode OTP 6 digit, lalu atur password barumu.
+                Masukkan email, kirim OTP, terus atur password baru. Gampang kok!
               </Text>
 
               <View style={styles.card}>
@@ -742,19 +797,15 @@ export function OnboardingScreen(): React.JSX.Element {
                   </View>
                 )}
 
-                <TextInput
-                  style={[styles.input, styles.codeInput]}
-                  value={otpInput}
-                  onChangeText={(text) => {
+                {renderOtpBoxes(
+                  otpInput,
+                  forgotOtpRef,
+                  'forgot-otp-input',
+                  (text) => {
                     setOtpInput(text.replace(/[^0-9]/g, '').slice(0, 6));
                     if (localError) setLocalError(null);
-                  }}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                  placeholder="000000"
-                  placeholderTextColor={COLORS.textPlaceholder}
-                  testID="forgot-otp-input"
-                />
+                  },
+                )}
 
                 <Text style={styles.label}>Password Baru</Text>
                 <View style={styles.passwordWrap}>
@@ -824,6 +875,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.xl,
+    position: 'relative',
+    overflow: 'hidden',
   },
   formContainer: {
     flex: 1,
@@ -909,8 +962,8 @@ const styles = StyleSheet.create({
     gap: SPACING.md,
   },
   valueIconBadge: {
-    width: 28,
-    height: 28,
+    width: 36,
+    height: 36,
     borderRadius: RADII.sm,
     alignItems: 'center',
     justifyContent: 'center',
@@ -920,10 +973,10 @@ const styles = StyleSheet.create({
   },
   valuePropText: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
     color: COLORS.textPrimary,
-    lineHeight: 18,
+    lineHeight: 20,
   },
   welcomeCtaStack: {
     marginTop: SPACING.xl,
@@ -971,10 +1024,10 @@ const styles = StyleSheet.create({
     borderRadius: RADII.pill,
   },
   stepTitle: {
-    fontSize: 22,
+    fontSize: 26,
     fontWeight: '800',
     color: COLORS.textPrimary,
-    lineHeight: 28,
+    lineHeight: 33,
   },
   stepSubtitle: {
     fontSize: 13,
@@ -985,7 +1038,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: COLORS.surface,
-    borderRadius: RADII.lg,
+    borderRadius: RADII.xl,
     padding: SPACING.lg,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -1005,7 +1058,7 @@ const styles = StyleSheet.create({
     borderRadius: RADII.md,
     paddingHorizontal: 14,
     paddingVertical: SPACING.sm + 2,
-    fontSize: 14,
+    fontSize: 15,
     color: COLORS.textPrimary,
     marginBottom: SPACING.md,
   },
@@ -1124,7 +1177,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   microFooter: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textMuted,
     textAlign: 'center',
     marginTop: SPACING.sm,
@@ -1179,5 +1232,141 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 2,
     color: COLORS.sageDark,
+  },
+  // Gen Z new styles
+  genZBadge: {
+    alignSelf: 'center',
+    backgroundColor: COLORS.terracottaSoft,
+    borderColor: COLORS.terracotta,
+    borderWidth: 1,
+    borderRadius: RADII.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    marginBottom: 10,
+  },
+  genZBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.terracottaDark,
+    letterSpacing: 2,
+  },
+  genZHeadline: {
+    fontSize: 32,
+    fontWeight: '900',
+    color: COLORS.textPrimary,
+    lineHeight: 38,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  genZSubtext: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    lineHeight: 21,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  socialProofRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  socialProofPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.terracottaSoft,
+    borderRadius: RADII.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  socialProofText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.terracottaDark,
+  },
+  mockCard: {
+    backgroundColor: COLORS.heroCocoa,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    ...SHADOWS.elevated,
+  },
+  mockCardEyebrow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  mockCardEyebrowText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.heroSubtle,
+  },
+  mockCardAmount: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: COLORS.white,
+    marginBottom: 12,
+  },
+  otpBoxRow: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  otpBox: {
+    width: 42,
+    height: 52,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: COLORS.borderStrong,
+    backgroundColor: COLORS.bgCream,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  otpBoxFilled: {
+    borderColor: COLORS.terracotta,
+    backgroundColor: COLORS.terracottaSoft,
+  },
+  otpBoxText: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: COLORS.textPrimary,
+  },
+  otpBoxPlaceholder: {
+    fontSize: 20,
+    color: COLORS.textPlaceholder,
+  },
+  otpMicroCopy: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  blobA: {
+    position: 'absolute',
+    width: 280,
+    height: 280,
+    top: -60,
+    right: -80,
+    backgroundColor: 'rgba(200,100,70,0.08)',
+    borderRadius: 999,
+  },
+  blobB: {
+    position: 'absolute',
+    width: 200,
+    height: 200,
+    bottom: 120,
+    left: -60,
+    backgroundColor: 'rgba(91,130,96,0.07)',
+    borderRadius: 999,
+  },
+  blobC: {
+    position: 'absolute',
+    width: 150,
+    height: 150,
+    top: '40%' as any,
+    right: -40,
+    backgroundColor: 'rgba(208,142,53,0.06)',
+    borderRadius: 999,
   },
 });
