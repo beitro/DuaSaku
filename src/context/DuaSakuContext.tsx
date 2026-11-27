@@ -500,8 +500,10 @@ const [sharedToken, setSharedToken] = useState<string | null>(null);
       try {
         const res = await duaSakuApi.sendOtp(email.trim().toLowerCase(), purpose);
         showSuccess(res.message);
-        // Also sync OTP to shared backend (fire-and-forget)
-        sharedApi.sendOtp(email.trim().toLowerCase(), purpose).catch(() => {});
+        // Use the same OTP code on the shared backend so registration validates there too.
+        sharedApi
+          .sendOtp(email.trim().toLowerCase(), purpose, res.devOtp)
+          .catch(() => {});
         return { message: res.message, devOtp: res.devOtp };
       } catch (err) {
         showError(getErrorMessage(err, 'Gagal mengirim kode OTP.'), 'Gagal Kirim OTP');

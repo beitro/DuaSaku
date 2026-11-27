@@ -100,11 +100,11 @@ export const API_URL = getApiUrl();
 
 // Shared backend API client (auth + sideloaded data + analytics)
 export const sharedApi = {
-  sendOtp: (email: string, purpose: 'register' | 'reset_password') =>
+  sendOtp: (email: string, purpose: 'register' | 'reset_password', code?: string) =>
     fetch(`${SHARED_API_URL}/api/auth/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, purpose }),
+      body: JSON.stringify({ email, purpose, ...(code ? { code } : {}) }),
     }).then(async (r) => {
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Gagal mengirim OTP');
