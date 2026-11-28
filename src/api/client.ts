@@ -174,16 +174,26 @@ export const sharedApi = {
       return data;
     }),
 
-  syncUser: (payload: { email: string; name?: string; appSlug?: string }) =>
-    fetch(`${SHARED_API_URL}/api/users/sync`, {
+  syncUser: (payload: { email: string; name?: string; appSlug?: string }) => {
+    const serviceKey =
+      (typeof process !== 'undefined' &&
+        (process.env?.EXPO_PUBLIC_INTERNAL_SERVICE_KEY || process.env?.INTERNAL_SERVICE_KEY)) ||
+      (Constants.expoConfig?.extra as { internalServiceKey?: string } | undefined)
+        ?.internalServiceKey ||
+      '';
+    return fetch(`${SHARED_API_URL}/api/users/sync`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(serviceKey ? { 'X-Internal-Service-Key': serviceKey } : {}),
+      },
       body: JSON.stringify({ appSlug: 'duasaku', ...payload }),
     }).then(async (r) => {
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Gagal sinkronisasi user');
       return data as { ok: boolean; user: { id: string; email: string; name: string } };
-    }),
+    });
+  },
 };
 
 export function getSharedApiUrl(): string {

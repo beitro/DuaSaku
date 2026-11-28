@@ -140,26 +140,24 @@ async function runTest() {
   assert(getQueue()[0].nextRetryAt > Date.now(), "nextRetryAt must be pushed to future");
   console.log("✓ Failed item persisted with incremented attempts & future retry timestamp.");
 
-  // 4. Online Success & Live Endpoint Sync
-  console.log("\n4. Verifying Online Drain against Live Shared Backend...");
+  // 4. Online Success & Queue Drain Behavior
+  console.log("\n4. Verifying Online Drain Behavior...");
   // Reset retry time to now
   const q = getQueue();
   q[0].nextRetryAt = Date.now() - 1000;
   saveQueue(q);
 
   let onlineResult = await drainQueue(async (item) => {
-    const res = await fetch("https://shared-backend-two.vercel.app/api/users/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: item.email, name: item.name, appSlug: item.appSlug })
-    });
-    return res.ok;
+    // Simulates successful synchronization worker execution without polluting live database
+    assert.equal(item.email, email1);
+    assert.equal(item.appSlug, "duasaku");
+    return true;
   });
 
   assert.equal(onlineResult.drained, 1);
   assert.equal(onlineResult.remaining, 0);
   assert.equal(getQueue().length, 0, "Queue must be empty after successful drain");
-  console.log("✓ Queue item drained and confirmed synced with Shared Backend.");
+  console.log("✓ Queue item drained and confirmed synced successfully.");
 
   console.log("\nALL TESTS PASSED (100% OK)");
 }
