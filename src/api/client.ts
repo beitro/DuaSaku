@@ -173,6 +173,17 @@ export const sharedApi = {
       if (!r.ok) throw new Error(data.error || 'Gagal kirim analytics');
       return data;
     }),
+
+  syncUser: (payload: { email: string; name?: string; appSlug?: string }) =>
+    fetch(`${SHARED_API_URL}/api/users/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appSlug: 'duasaku', ...payload }),
+    }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Gagal sinkronisasi user');
+      return data as { ok: boolean; user: { id: string; email: string; name: string } };
+    }),
 };
 
 export function getSharedApiUrl(): string {

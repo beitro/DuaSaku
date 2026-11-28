@@ -8,6 +8,12 @@ import React, {
   useState,
 } from 'react';
 import { ApiError, duaSakuApi, sharedApi } from '../api/client';
+import {
+  enqueueRegistrationSync,
+  drainRegistrationSyncQueue,
+  startRegistrationSyncWorker,
+  subscribeSharedToken,
+} from '../api/registrationSyncQueue';
 import type { FeedbackKind, FeedbackState } from '../components/FeedbackBanner';
 import type {
   AccountTotals,
@@ -296,6 +302,15 @@ const [sharedToken, setSharedToken] = useState<string | null>(null);
     recurringRulesRef.current = recurringRules;
   }, [recurringRules]);
 
+  useEffect(() => {
+    const unsubscribeToken = subscribeSharedToken((st) => setSharedToken(st));
+    const stopWorker = startRegistrationSyncWorker();
+    return () => {
+      unsubscribeToken();
+      stopWorker();
+    };
+  }, []);
+
   const clearFeedbackTimer = useCallback(() => {
     if (feedbackTimerRef.current !== null) {
       clearTimeout(feedbackTimerRef.current);
@@ -533,15 +548,14 @@ const [sharedToken, setSharedToken] = useState<string | null>(null);
           inviteCode: payload.inviteCode?.trim().toUpperCase(),
           otpCode: payload.otpCode.trim(),
         });
-        // Sync to shared backend (fire-and-forget)
-        sharedApi
-          .register({
-            email: payload.email.trim(),
-            password: payload.password,
-            name: payload.partnerName.trim(),
-            otpCode: payload.otpCode.trim(),
-          })
-          .then((r) => setSharedToken(r.token))
+        // Sync to shared backend with persistent outbox queue and immediate drain
+        enqueueRegistrationSync({
+          email: payload.email.trim(),
+          password: payload.password,
+          name: payload.partnerName.trim(),
+          otpCode: payload.otpCode.trim(),
+        })
+          .then(() => drainRegistrationSyncQueue().catch(() => {}))
           .catch(() => {});
         await applyAuthSession(
           res,
