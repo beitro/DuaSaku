@@ -15,6 +15,7 @@ import { AppFrame } from '../components/AppFrame';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 import { PressableButton } from '../components/PressableButton';
 import { useDuaSaku } from '../context/DuaSakuContext';
+import { useKeyboardHeight } from '../hooks/useKeyboardVisible';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 
 type FlowStep = 'welcome' | 'login' | 'register_account' | 'setup_space' | 'forgot_password';
@@ -31,6 +32,7 @@ export function OnboardingScreen(): React.JSX.Element {
     feedback,
     clearFeedback,
   } = useDuaSaku();
+  const keyboardHeight = useKeyboardHeight();
 
   const [step, setStep] = useState<FlowStep>('welcome');
   const [spaceMode, setSpaceMode] = useState<'create' | 'join'>('create');
@@ -249,6 +251,7 @@ export function OnboardingScreen(): React.JSX.Element {
           contentContainerStyle={[
             styles.scrollContent,
             step === 'welcome' && styles.welcomeScrollContent,
+            keyboardHeight > 0 && { paddingBottom: keyboardHeight + SPACING.lg },
           ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"

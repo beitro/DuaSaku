@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
-  KeyboardAvoidingView,
   Modal,
   PanResponder,
   Platform,
@@ -15,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
-import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
+import { useKeyboardHeight } from '../hooks/useKeyboardVisible';
 import { useReduceMotion } from '../hooks/useReduceMotion';
 import {
   CATEGORY_COLOR_PRESETS,
@@ -58,7 +57,7 @@ export function QuickEntrySheet(): React.JSX.Element | null {
     showSuccess,
   } = useDuaSaku();
   const { height } = useWindowDimensions();
-  const keyboardVisible = useKeyboardVisible();
+  const keyboardHeight = useKeyboardHeight();
 
   const [type, setType] = useState<TransactionType>('expense');
   const [amountInput, setAmountInput] = useState('');
@@ -410,12 +409,10 @@ export function QuickEntrySheet(): React.JSX.Element | null {
           styles.backdrop,
           Platform.OS === 'web' ? { minHeight: height } : undefined,
           { opacity: backdropOpacity },
+          keyboardHeight > 0 && styles.backdropKeyboard,
+          keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
         ]}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboardAvoiding}
-        >
           <Animated.View
             style={[
               styles.card,
@@ -443,7 +440,12 @@ export function QuickEntrySheet(): React.JSX.Element | null {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
-            style={{ maxHeight: height * (keyboardVisible ? 0.5 : 0.72) }}
+            style={{
+              maxHeight:
+                keyboardHeight > 0
+                  ? Math.max(160, height - keyboardHeight - 170)
+                  : height * 0.72,
+            }}
           >
             {/* Type Toggle */}
             <View style={styles.segmentRow}>
@@ -727,7 +729,6 @@ export function QuickEntrySheet(): React.JSX.Element | null {
             </TouchableOpacity>
           </View>
           </Animated.View>
-        </KeyboardAvoidingView>
       </Animated.View>
     </Modal>
     {showCategoryModal && (
@@ -972,9 +973,9 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: COLORS.textOnDark,
   },
-  keyboardAvoiding: {
-    width: '100%',
-    maxWidth: 460,
+  backdropKeyboard: {
+    justifyContent: 'flex-start',
+    paddingTop: SPACING.sm,
   },
   addCategoryBtn: {
     paddingHorizontal: 10,

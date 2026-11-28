@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
+import { useKeyboardHeight } from '../hooks/useKeyboardVisible';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import type { SharedNote } from '../types';
 import { formatShortDateId } from '../utils/format';
@@ -28,6 +29,7 @@ export function NotesScreen(): React.JSX.Element {
     requestConfirm,
   } = useDuaSaku();
   const { height } = useWindowDimensions();
+  const keyboardHeight = useKeyboardHeight();
 
   const [subTab, setSubTab] = useState<'notes' | 'debts'>('notes');
   const [showModal, setShowModal] = useState(false);
@@ -252,11 +254,23 @@ export function NotesScreen(): React.JSX.Element {
             style={[
               styles.modalBackdrop,
               Platform.OS === 'web' ? { minHeight: height } : undefined,
+              keyboardHeight > 0 && styles.backdropKeyboard,
+              keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
             ]}
           >
             <ScrollView
-              contentContainerStyle={styles.modalScroll}
+              contentContainerStyle={[
+                styles.modalScroll,
+                keyboardHeight > 0 && styles.modalScrollKeyboard,
+              ]}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              style={{
+                maxHeight:
+                  keyboardHeight > 0
+                    ? Math.max(180, height - keyboardHeight - SPACING.lg * 2)
+                    : undefined,
+              }}
             >
               <View style={styles.modalCard}>
                 <Text style={styles.modalTitle}>
@@ -527,9 +541,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: SPACING.lg,
   },
+  backdropKeyboard: {
+    justifyContent: 'flex-start',
+  },
   modalScroll: {
     flexGrow: 1,
     justifyContent: 'center',
+  },
+  modalScrollKeyboard: {
+    justifyContent: 'flex-start',
   },
   modalCard: {
     width: '100%',

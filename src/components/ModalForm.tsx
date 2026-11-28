@@ -2,7 +2,6 @@ import React, { useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Animated,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -12,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
-import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
+import { useKeyboardHeight } from '../hooks/useKeyboardVisible';
 import { useReduceMotion } from '../hooks/useReduceMotion';
 import { PressableButton } from './PressableButton';
 import { COLORS, MOTION, RADII, SHADOWS, SPACING } from '../theme/tokens';
@@ -49,7 +48,7 @@ export function ModalForm({
   cancelTestID,
 }: ModalFormProps): React.JSX.Element | null {
   const { height } = useWindowDimensions();
-  const keyboardVisible = useKeyboardVisible();
+  const keyboardHeight = useKeyboardHeight();
   const reduceMotion = useReduceMotion();
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const cardScale = useRef(new Animated.Value(0.95)).current;
@@ -147,20 +146,24 @@ export function ModalForm({
           styles.backdrop,
           Platform.OS === 'web' ? { minHeight: height } : undefined,
           { opacity: backdropOpacity },
+          keyboardHeight > 0 && styles.backdropKeyboard,
+          keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
         ]}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.keyboardAvoiding}
-        >
           <ScrollView
             contentContainerStyle={[
               styles.modalScroll,
-              keyboardVisible && styles.modalScrollKeyboard,
+              keyboardHeight > 0 && styles.modalScrollKeyboard,
             ]}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
+            style={{
+              maxHeight:
+                keyboardHeight > 0
+                  ? Math.max(180, height - keyboardHeight - SPACING.lg * 2)
+                  : undefined,
+            }}
           >
             <Animated.View
               style={[
@@ -219,7 +222,6 @@ export function ModalForm({
               </View>
             </Animated.View>
           </ScrollView>
-        </KeyboardAvoidingView>
       </Animated.View>
     </Modal>
   );
@@ -231,8 +233,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.backdrop,
     padding: SPACING.lg,
   },
-  keyboardAvoiding: {
-    flex: 1,
+  backdropKeyboard: {
+    justifyContent: 'flex-start',
   },
   modalScroll: {
     flexGrow: 1,

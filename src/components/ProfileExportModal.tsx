@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useDuaSaku } from '../context/DuaSakuContext';
+import { useKeyboardHeight } from '../hooks/useKeyboardVisible';
 import { COLORS, RADII, SHADOWS, SPACING } from '../theme/tokens';
 import { formatMonthLabel } from '../utils/format';
 import { useAppLockSettings } from './AppLockGate';
@@ -34,6 +35,7 @@ export function ProfileExportModal({
     exportMonthlyReport,
   } = useDuaSaku();
   const { height } = useWindowDimensions();
+  const keyboardHeight = useKeyboardHeight();
 
   const [coupleName, setCoupleName] = useState('');
   const [partnerName, setPartnerName] = useState('');
@@ -98,9 +100,24 @@ export function ProfileExportModal({
         style={[
           styles.backdrop,
           Platform.OS === 'web' ? { minHeight: height } : undefined,
+          keyboardHeight > 0 && styles.backdropKeyboard,
+          keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
         ]}
       >
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={[
+            styles.scroll,
+            keyboardHeight > 0 && styles.scrollKeyboard,
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          style={{
+            maxHeight:
+              keyboardHeight > 0
+                ? Math.max(180, height - keyboardHeight - SPACING.lg * 2)
+                : undefined,
+          }}
+        >
           <View style={styles.card}>
             <Text style={styles.title}>Profil Ruang & Ekspor Laporan</Text>
 
@@ -303,9 +320,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: SPACING.lg,
   },
+  backdropKeyboard: {
+    justifyContent: 'flex-start',
+  },
   scroll: {
     flexGrow: 1,
     justifyContent: 'center',
+  },
+  scrollKeyboard: {
+    justifyContent: 'flex-start',
   },
   card: {
     width: '100%',
